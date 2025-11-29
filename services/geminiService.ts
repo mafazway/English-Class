@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai"; // இதுதான் சரி
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
