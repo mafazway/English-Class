@@ -1,0 +1,7 @@
+{
+  "name": "English Class Academy_075 2 786 256",
+  "description": "A mobile-first English tuition management app powered by Gemini. Manage students, track attendance, and use AI to draft parent messages and lesson plans. Note: This is a web application designed to function like a mobile app.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
