@@ -1,8 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai"; // இதுதான் சரி
+import { GoogleGenAI } from "@google/genai";
 
+// Access API Key safely
+// The API key must be obtained exclusively from the environment variable process.env.API_KEY
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-const MODEL_NAME = 'gemini-2.5-flash';
+// Using gemini-2.5-flash for basic text tasks
+const MODEL_NAME = "gemini-2.5-flash";
 
 export const generateParentMessage = async (
   studentName: string,
@@ -10,12 +13,12 @@ export const generateParentMessage = async (
   topic: string,
   tone: 'formal' | 'friendly' | 'concerned'
 ): Promise<string> => {
-  if (!process.env.API_KEY) {
-    console.warn("Gemini API Key is missing");
-    return "AI Service Unavailable (Key Missing).";
-  }
-
   try {
+    if (!process.env.API_KEY) {
+      console.warn("Gemini API Key is missing");
+      return "AI Service Unavailable (Key Missing).";
+    }
+
     const prompt = `
       Act as an English tuition teacher.
       Write a short, professional WhatsApp message to a parent.
@@ -44,9 +47,9 @@ export const generateLessonPlan = async (
   gradeLevel: string,
   duration: string
 ): Promise<string> => {
-  if (!process.env.API_KEY) return "AI Service Unavailable (Key Missing)";
-
   try {
+    if (!process.env.API_KEY) return "AI Service Unavailable (Key Missing)";
+
     const prompt = `
       Create a brief English lesson plan.
       Topic: ${topic}
@@ -78,9 +81,9 @@ export const analyzeStudentProgress = async (
   attendanceRate: number,
   notes: string
 ): Promise<string> => {
-  if (!process.env.API_KEY) return "AI Service Unavailable (Key Missing)";
-  
   try {
+    if (!process.env.API_KEY) return "AI Service Unavailable (Key Missing)";
+    
     const prompt = `
       Provide a brief 2-sentence summary of a student's standing for an English teacher's internal notes.
       Student: ${studentName}
@@ -105,9 +108,9 @@ export const analyzeExamPerformance = async (
   studentName: string,
   history: { date: string; testName: string; score: number; total: number }[]
 ): Promise<string> => {
-  if (!process.env.API_KEY) return "AI Service Unavailable (Key Missing)";
-
   try {
+    if (!process.env.API_KEY) return "AI Service Unavailable (Key Missing)";
+
     const historyStr = history.map(h => `- ${h.date} (${h.testName}): ${h.score}/${h.total}`).join('\n');
     const prompt = `
       Analyze the evolution of test marks for a student named ${studentName}.
@@ -133,15 +136,20 @@ export const analyzeExamPerformance = async (
 };
 
 export const generateContent = async (prompt: string) => {
-  if (!process.env.API_KEY) return "AI Service Unavailable (Key Missing)";
   try {
+    if (!process.env.API_KEY) {
+      console.warn("Gemini API Key is missing. Please check your .env file.");
+      return "AI Service Unavailable (Key Missing)";
+    }
+
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: prompt,
     });
+    
     return response.text || "";
   } catch (error) {
     console.error("Error generating content:", error);
-    return "Failed to generate content.";
+    return "Failed to generate content. Please try again.";
   }
 };
