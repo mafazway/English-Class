@@ -16,7 +16,7 @@
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
     "xlsx": "^0.18.5",
-    "@google/genai": "^0.1.1"
+    "@google/generative-ai": "^0.21.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.64",
