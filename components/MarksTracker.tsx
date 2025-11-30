@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Student, ExamRecord } from '../types';
-import { Plus, TrendingUp, TrendingDown, Minus, Sparkles, Trash2, BarChart3, X, Calendar, User, Trophy, Activity, History, Layers, Save, AlertCircle, AlertTriangle, Edit2 } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Minus, Sparkles, Trash2, BarChart3, X, Calendar, User, Trophy, Activity, History, Layers, Save, AlertCircle, AlertTriangle, Edit2, Search } from 'lucide-react';
 import { Button, Card, Input, Select } from './UIComponents';
 import { analyzeExamPerformance } from '../services/geminiService';
 import toast from 'react-hot-toast';
@@ -21,6 +21,7 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
   const [selectedStudentId, setSelectedStudentId] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState(''); // Search State
   const [formData, setFormData] = useState({
     studentId: '',
     testName: '',
@@ -54,12 +55,23 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [students, bulkGrade]);
 
-  // 1. Recent Global History (Last 5 records)
-  const recentRecords = useMemo(() => {
-    return [...examRecords]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 5);
-  }, [examRecords]);
+  // 1. Overview Records (Filtered by Search or Recent 5)
+  const filteredOverviewRecords = useMemo(() => {
+    // If search is empty, return only last 5 records
+    if (!searchTerm.trim()) {
+      return [...examRecords]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .slice(0, 5);
+    }
+
+    // If searching, filter all records
+    const term = searchTerm.toLowerCase();
+    return examRecords.filter(r => {
+       const student = students.find(s => s.id === r.studentId);
+       const sName = student ? student.name.toLowerCase() : '';
+       return sName.includes(term) || r.testName.toLowerCase().includes(term);
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [examRecords, searchTerm, students]);
 
   // 2. Selected Student History
   const studentRecords = useMemo(() => {
@@ -238,10 +250,10 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
             <div className="relative flex-1">
                <Select 
                  value={selectedStudentId} 
-                 onChange={e => { setSelectedStudentId(e.target.value); setAnalysisResult(''); }}
+                 onChange={e => { setSelectedStudentId(e.target.value); setAnalysisResult(''); setSearchTerm(''); }}
                  className="!mb-0 !border-gray-200 !bg-gray-50 !rounded-xl !py-2.5 !text-sm"
                >
-                 <option value="">Overview (Recent Activity)</option>
+                 <option value="">Overview (Search / Recent)</option>
                  {students.map(s => (
                    <option key={s.id} value={s.id}>{s.name}</option>
                  ))}
@@ -369,24 +381,38 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
         {/* ================= INDIVIDUAL VIEW ================= */}
         {viewMode === 'individual' && !selectedStudentId && (
           <div className="space-y-4 animate-fade-in px-3">
-             <div className="flex items-center gap-2 text-gray-500 mb-2">
-                <History size={16} />
-                <span className="text-sm font-bold uppercase tracking-wide">Recently Added</span>
+             {/* Search Bar */}
+             <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                <input 
+                  type="text" 
+                  placeholder="Search student name..." 
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
              </div>
 
-             {recentRecords.length === 0 ? (
+             <div className="flex items-center gap-2 text-gray-500 mb-2">
+                <History size={16} />
+                <span className="text-sm font-bold uppercase tracking-wide">
+                   {searchTerm ? 'Search Results' : 'Recently Added'}
+                </span>
+             </div>
+
+             {filteredOverviewRecords.length === 0 ? (
                <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border border-dashed border-gray-200">
                  <BarChart3 size={48} className="mx-auto mb-2 opacity-20" />
-                 <p className="text-sm">No marks recorded yet.</p>
-                 <p className="text-xs">Tap the + button to add one.</p>
+                 <p className="text-sm">No records found.</p>
+                 {!searchTerm && <p className="text-xs">Tap the + button to add one.</p>}
                </div>
              ) : (
-               recentRecords.map(record => {
+              filteredOverviewRecords.map(record => {
                  const pct = Math.round((record.score / record.total) * 100);
                  const studentName = getStudentName(record.studentId);
                  
                  return (
-                   <div key={record.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center relative overflow-hidden">
+                   <div key={record.id} className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex justify-between items-center relative overflow-hidden group">
                       <div className={`absolute left-0 top-0 bottom-0 w-1 ${pct >= 75 ? 'bg-green-500' : pct >= 50 ? 'bg-yellow-500' : 'bg-red-500'}`} />
                       <div>
                          <p className="font-bold text-gray-800 text-sm">{studentName}</p>
@@ -397,19 +423,32 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
                            <span className="text-lg font-bold text-indigo-900">{pct}%</span>
                            <p className="text-[10px] text-gray-400">{record.score}/{record.total}</p>
                         </div>
-                        <button 
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             if(confirm('Are you sure you want to delete this mark?')) {
-                               onDeleteExamRecord(record.id);
-                               toast.success("Record deleted");
-                             }
-                           }}
-                           className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
-                           title="Delete Record"
-                        >
-                           <Trash2 size={16} />
-                        </button>
+                        
+                        <div className="flex gap-1">
+                          <button 
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               openModal(record);
+                             }}
+                             className="p-2 text-gray-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
+                             title="Edit Record"
+                          >
+                             <Edit2 size={16} />
+                          </button>
+                          <button 
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               if(confirm('Are you sure you want to delete this mark?')) {
+                                 onDeleteExamRecord(record.id);
+                                 toast.success("Record deleted");
+                               }
+                             }}
+                             className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
+                             title="Delete Record"
+                          >
+                             <Trash2 size={16} />
+                          </button>
+                        </div>
                       </div>
                    </div>
                  );

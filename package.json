@@ -16,11 +16,12 @@
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
     "xlsx": "^0.18.5",
-    "@google/genai": "^0.1.0",
+    "@google/genai": "^0.2.1",
     "jspdf": "^2.5.1",
     "jspdf-autotable": "^3.8.2"
   },
   "devDependencies": {
+    "@types/node": "^20.11.24",
     "@types/react": "^18.2.64",
     "@types/react-dom": "^18.2.21",
     "@vitejs/plugin-react": "^4.2.1",

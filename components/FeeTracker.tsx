@@ -206,7 +206,9 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
     const toastId = toast.loading("Generating PDF...");
     try {
       // Dynamic import to prevent white screen / build errors
+      // @ts-ignore
       const { jsPDF } = await import('jspdf');
+      // @ts-ignore
       const autoTable = (await import('jspdf-autotable')).default;
 
       const doc = new jsPDF();
