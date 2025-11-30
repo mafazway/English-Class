@@ -1,5 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { Student } from '../types';
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import { Student, FeeRecord, ExamRecord } from '../types';
 import { Plus, User, Phone, Search, X, Edit2, Trash2, Camera, Contact, MessageCircle, Image as ImageIcon, Hash, Filter, MoreVertical, UserCircle, CheckCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button, Card, Input, TextArea, Select } from './UIComponents';
 import toast from 'react-hot-toast';
@@ -7,6 +8,8 @@ import { formatSLNumber } from '../utils';
 
 interface Props {
   students: Student[];
+  feeRecords: FeeRecord[];
+  examRecords: ExamRecord[];
   onAddStudent: (s: Student) => Promise<boolean> | void;
   onUpdateStudent: (s: Student) => void;
   onDeleteStudent: (id: string) => void;
@@ -14,17 +17,17 @@ interface Props {
   onResetAddModal?: () => void;
 }
 
-const StudentManager: React.FC<Props> = ({ students, onAddStudent, onUpdateStudent, onDeleteStudent, shouldOpenAddModal, onResetAddModal }) => {
+const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, onAddStudent, onUpdateStudent, onDeleteStudent, shouldOpenAddModal, onResetAddModal }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedGradeFilter, setSelectedGradeFilter] = useState(''); // Fixed typo from previous file
-  const [activeMenuId, setActiveMenuId] = useState<string | null>(null); // Track open menu
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState(''); 
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null); 
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // UX Feedback State
   const [sessionAddedCount, setSessionAddedCount] = useState(0);
-  const [isCompressing, setIsCompressing] = useState(false); // New compression state
+  const [isCompressing, setIsCompressing] = useState(false); 
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Form State
@@ -109,6 +112,23 @@ const StudentManager: React.FC<Props> = ({ students, onAddStudent, onUpdateStude
       }
     }
   };
+
+  // --- Stats Calculation for Editing Student ---
+  const studentStats = useMemo(() => {
+    if (!editingId) return null;
+    
+    // Fees
+    const sFees = feeRecords.filter(f => f.studentId === editingId).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const lastFee = sFees[0];
+    const lastPaidDate = lastFee ? new Date(lastFee.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No Data';
+
+    // Exams
+    const sExams = examRecords.filter(e => e.studentId === editingId).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const lastExam = sExams[0];
+    const lastExamStr = lastExam ? `${lastExam.testName}: ${lastExam.score}/${lastExam.total}` : 'No Data';
+
+    return { lastPaidDate, lastExamStr };
+  }, [editingId, feeRecords, examRecords]);
 
   // --- Camera / Image Handling (Compressed) ---
   const handleImageClick = () => {
@@ -453,6 +473,27 @@ const StudentManager: React.FC<Props> = ({ students, onAddStudent, onUpdateStude
                       </button>
                    </div>
                 </div>
+
+                {/* --- STUDENT SUMMARY STATS (NEW) --- */}
+                {editingId && studentStats && (
+                  <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 flex justify-between items-center text-xs font-medium text-indigo-900 animate-fade-in">
+                    <div className="flex items-center gap-2">
+                      <span className="p-1.5 bg-white rounded-lg shadow-sm text-lg">💰</span>
+                      <div>
+                        <p className="opacity-60 text-[10px] uppercase tracking-wide">Last Paid</p>
+                        <p className="font-bold">{studentStats.lastPaidDate}</p>
+                      </div>
+                    </div>
+                    <div className="w-px h-8 bg-indigo-200"></div>
+                    <div className="flex items-center gap-2 text-right">
+                      <div>
+                        <p className="opacity-60 text-[10px] uppercase tracking-wide">Last Exam</p>
+                        <p className="font-bold">{studentStats.lastExamStr}</p>
+                      </div>
+                      <span className="p-1.5 bg-white rounded-lg shadow-sm text-lg">📊</span>
+                    </div>
+                  </div>
+                )}
 
                 <Input label="Parent Name" placeholder="Father/Mother Name" value={formData.parentName || ''} onChange={e => setFormData({...formData, parentName: e.target.value})} />
                 

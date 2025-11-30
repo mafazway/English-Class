@@ -6,11 +6,25 @@ import { Toaster } from 'react-hot-toast';
 // PWA registration removed to prevent "Failed to load" errors in preview
 // import { registerSW } from 'virtual:pwa-register'; 
 
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: any;
+}
+
 // Error Boundary to catch runtime crashes
-class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: any}> {
-  constructor(props: any) { super(props); this.state = { hasError: false, error: null }; }
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) { 
+    super(props); 
+    this.state = { hasError: false, error: null }; 
+  }
   
-  static getDerivedStateFromError(error: any) { return { hasError: true, error }; }
+  static getDerivedStateFromError(error: any): ErrorBoundaryState { 
+    return { hasError: true, error }; 
+  }
   
   componentDidCatch(error: any, info: any) { 
     console.error("Critical App Crash:", error, info); 

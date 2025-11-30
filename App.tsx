@@ -381,6 +381,8 @@ const App: React.FC = () => {
       case 'students':
         return <StudentManager 
               students={students} 
+              feeRecords={feeRecords}
+              examRecords={examRecords}
               onAddStudent={addStudent} 
               onUpdateStudent={updateStudent} 
               onDeleteStudent={deleteStudent}
