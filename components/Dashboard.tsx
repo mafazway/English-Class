@@ -81,33 +81,43 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
     }).sort((a, b) => b.presentCount - a.presentCount);
   }, [students, attendance]);
 
-  // Fee Alerts Logic
+  // Fee Alerts Logic (Consistent with FeeTracker)
   const feeAlerts = useMemo(() => {
     let overdueCount = 0;
-    let dueSoonCount = 0;
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     students.forEach(student => {
-      const records = feeRecords.filter(r => r.studentId === student.id);
-      const totalPaymentsMade = records.length;
-      const joinDateObj = student.joinedDate ? new Date(student.joinedDate) : new Date();
-      const billingDay = joinDateObj.getDate();
-      let targetMonth = joinDateObj.getMonth() + totalPaymentsMade;
-      let targetYear = joinDateObj.getFullYear();
-      targetYear += Math.floor(targetMonth / 12);
-      targetMonth = targetMonth % 12;
-      const daysInTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
-      const actualDay = Math.min(billingDay, daysInTargetMonth);
-      const nextDueDate = new Date(targetYear, targetMonth, actualDay);
+      // 1. Count Payments
+      const paymentCount = feeRecords.filter(r => r.studentId === student.id).length;
+      
+      // 2. Determine Anchor Date (SAFE PARSING)
+      let joinDate = new Date();
+      if (student.joinedDate) {
+         const [y, m, d] = student.joinedDate.split('-').map(Number);
+         joinDate = new Date(y, m - 1, d);
+      }
+      const joinedDay = joinDate.getDate();
+
+      // 3. Calculate Next Due Date (Joined + Payments)
+      // Note: Removed the '+ 1' month to ensure immediate first month due logic applies correctly
+      const nextDueDate = new Date(joinDate);
+      nextDueDate.setMonth(joinDate.getMonth() + paymentCount);
+
+      // Handle End of Month overflow
+      if (nextDueDate.getDate() !== joinedDay) {
+        nextDueDate.setDate(0); 
+      }
       nextDueDate.setHours(0,0,0,0);
-      const today = new Date();
-      today.setHours(0,0,0,0);
-      if (nextDueDate <= today) overdueCount++;
-      else {
-        const diffTime = nextDueDate.getTime() - today.getTime();
-        const daysUntilDue = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        if (daysUntilDue <= 7 && daysUntilDue >= 0) dueSoonCount++;
+
+      // 4. Compare
+      if (nextDueDate < today) {
+         overdueCount++;
       }
     });
-    return { overdueCount, dueSoonCount };
+
+    return { overdueCount };
   }, [students, feeRecords]);
 
   // Consecutive Absence Logic
@@ -284,7 +294,7 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
          <AnalyticsSummary students={students} attendance={attendance} feeRecords={feeRecords} />
 
          {/* A. NOTIFICATION TICKER (Fee Alerts) */}
-         {(feeAlerts.overdueCount > 0 || feeAlerts.dueSoonCount > 0) && (
+         {(feeAlerts.overdueCount > 0) && (
             <div onClick={() => onNavigate('fees')} className="flex-shrink-0 bg-red-500 text-white rounded-lg px-3 py-2 flex items-center justify-between shadow-md shadow-red-200 cursor-pointer active:scale-[0.98] transition-transform">
                <div className="flex items-center gap-2">
                   <div className="bg-white/20 p-1 rounded-full"><AlertCircle size={14} className="text-white" /></div>
@@ -390,7 +400,7 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
          
          {/* Footer Info */}
          <div className="flex-shrink-0 text-center pb-1">
-            <p className="text-[9px] text-gray-300 font-medium">English Class Academy • v2.1 (PWA)</p>
+            <p className="text-[9px] text-gray-300 font-medium">English Class Academy • v2.2 (PWA)</p>
          </div>
 
       </div>

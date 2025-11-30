@@ -326,6 +326,14 @@ const App: React.FC = () => {
      syncMutation('exams', 'UPSERT', dbPayload);
   };
 
+  const updateExam = (r: ExamRecord) => {
+     setExamRecords(prev => prev.map(ex => ex.id === r.id ? r : ex));
+     const dbPayload = {
+        id: r.id, student_id: r.studentId, subject: r.testName, marks: r.score, total: r.total, exam_date: r.date
+     };
+     syncMutation('exams', 'UPSERT', dbPayload);
+  };
+
   const deleteExam = (id: string) => {
      setExamRecords(prev => prev.filter(r => r.id !== id));
      syncMutation('exams', 'DELETE', { id });
@@ -415,6 +423,7 @@ const App: React.FC = () => {
                 students={students}
                 examRecords={examRecords}
                 onAddExamRecord={addExam}
+                onUpdateExamRecord={updateExam}
                 onDeleteExamRecord={deleteExam}
              />;
       case 'ai-tools':
