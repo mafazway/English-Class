@@ -1,7 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { Student, ClassGroup, AttendanceRecord } from '../types';
 import { Save, Calendar as CalendarIcon, Check, X, RotateCcw, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { formatTime12H } from '../utils';
 
 interface AttendanceTrackerProps {
   students: Student[];
@@ -23,9 +25,21 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
   const uniqueStartTimes = ['All', ...Array.from(new Set(classes.map(c => c.startTime))).sort()];
   const uniqueClasses = ['All', ...Array.from(new Set(classes.map(c => c.name))).sort()];
 
+  // --- HELPER: Consistent Day Name ---
+  // Avoids timezone shifts by parsing YYYY-MM-DD as UTC
+  const getDayName = (dateStr: string) => {
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return '';
+    const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return days[d.getUTCDay()];
+  };
+
+  const currentDayName = getDayName(date);
+
   // --- STRICT FILTERING LOGIC ---
   const filteredStudents = students.filter(s => {
-    // 1. Grade Matching
+    // 1. Grade Matching (Manual Filter)
     let matchesGrade = true;
     if (selectedClassId !== 'All') {
       const classNum = selectedClassId.match(/\d+/);
@@ -37,12 +51,27 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
       }
     }
 
-    // 2. Time Matching (Intersection)
+    // 2. Time & Day Matching (Timetable Check)
     let matchesTime = true;
     if (selectedTime !== 'All') {
-      const activeClassesAtTime = classes.filter(c => c.startTime === selectedTime);
+      // Find classes that are actually scheduled for this DATE (Day) and TIME
+      const activeClasses = classes.filter(c => 
+         c.startTime === selectedTime && c.day === currentDayName
+      );
+
       if (s.grade) {
-         matchesTime = activeClassesAtTime.some(c => c.name.includes(s.grade));
+         // Check if student belongs to one of these active classes
+         // Robust check: Compare numeric part of grade to avoid "1" matching "10"
+         const studentGradeNum = s.grade.match(/\d+/)?.[0];
+
+         matchesTime = activeClasses.some(c => {
+             const classGradeNum = c.name.match(/\d+/)?.[0];
+             if (studentGradeNum && classGradeNum) {
+                 return studentGradeNum === classGradeNum;
+             }
+             // Fallback for non-numeric names
+             return c.name.toLowerCase().includes(s.grade.toLowerCase());
+         });
       } else {
          matchesTime = false;
       }
@@ -53,15 +82,29 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
 
   // Load Existing Attendance
   useEffect(() => {
+    // Also strictly filter attendance record loading by class/time if needed
+    // But usually we just look for a record for this Date + ClassID
+    // If selectedClassId is 'All', we rely on the filteredStudents loop below to check presence
     const record = attendanceRecords.find(r => r.date === date && (selectedClassId === 'All' || r.classId === selectedClassId));
+    
     const statusMap: Record<string, boolean> = {};
     
     // Iterate over FILTERED students to prep status
     filteredStudents.forEach(s => {
-      statusMap[s.id] = record ? record.studentIdsPresent.includes(s.id) : false;
+       // If specific record found, use it. 
+       // If "All" view, we might need to check multiple records? 
+       // Simplification: In 'All' view, we just check if student ID is in ANY record for this date? 
+       // For now, retaining existing logic which works for single-class marking mostly.
+       // Improved: Look for any record on this date containing the student
+       if (selectedClassId === 'All') {
+          const anyRecordToday = attendanceRecords.find(r => r.date === date && r.studentIdsPresent.includes(s.id));
+          statusMap[s.id] = !!anyRecordToday;
+       } else {
+          statusMap[s.id] = record ? record.studentIdsPresent.includes(s.id) : false;
+       }
     });
     setAttendanceStatus(statusMap);
-  }, [date, selectedClassId, selectedTime, attendanceRecords]); // Removing 'students' from dependency to avoid loop
+  }, [date, selectedClassId, selectedTime, attendanceRecords, students.length]); // Re-run when students list changes (filtered)
 
   // --- FIXED TOGGLE FUNCTION ---
   const toggleAttendance = (id: string) => {
@@ -130,7 +173,8 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
         <div className="flex items-center justify-between bg-white border border-gray-200 p-2 rounded-2xl mb-4 shadow-sm">
           <button onClick={() => changeDate(-1)} className="p-3 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl"><ChevronLeft size={20} /></button>
           <div className="text-center">
-            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">{new Date(date).toLocaleDateString('en-US', { weekday: 'long' })}</div>
+            {/* Display accurate Day Name derived from helper */}
+            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">{currentDayName}</div>
             <div className="flex items-center gap-2 text-lg font-extrabold text-indigo-900">
               <CalendarIcon size={18} className="text-indigo-500 mb-1" />
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent outline-none cursor-pointer w-auto text-center" />
@@ -150,7 +194,9 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
           <div className="flex-1 relative group">
             <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Clock size={16} className="text-gray-400" /></div>
             <select value={selectedTime} onChange={(e) => setSelectedTime(e.target.value)} className="w-full pl-10 pr-4 py-3.5 bg-white border border-gray-200 rounded-2xl text-sm font-bold text-gray-700 outline-none appearance-none cursor-pointer">
-              {uniqueStartTimes.map(t => <option key={t} value={t}>{t === 'All' ? 'All Times' : t}</option>)}
+              {uniqueStartTimes.map(t => (
+                <option key={t} value={t}>{t === 'All' ? 'All Times' : formatTime12H(t)}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -158,50 +204,56 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
         {/* Count Banner */}
         <div className="mt-4 bg-indigo-50 py-2 px-4 rounded-xl flex justify-between items-center">
            <span className="text-xs font-bold text-indigo-600">Students Found: {filteredStudents.length}</span>
+           {selectedTime !== 'All' && <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">{currentDayName} • {formatTime12H(selectedTime)}</span>}
         </div>
       </div>
 
       {/* STUDENT LIST */}
       <div className="space-y-3">
-        {filteredStudents.map(student => {
-          const isPresent = !!attendanceStatus[student.id];
-          const streak = student.consecutiveAbsences || 0; 
-          // Show Alert: Absent NOW + (Streak >= 2 OR Attendance < 50%)
-          // Note: Using hard check for Streak >= 2 as requested.
-          const showAlert = !isPresent && streak >= 2 && !dismissedAlerts.includes(student.id);
+        {filteredStudents.length === 0 ? (
+          <div className="text-center py-10 text-gray-400">
+            <p>No students found.</p>
+            {selectedTime !== 'All' && <p className="text-xs mt-1">Check Timetable for {currentDayName} @ {formatTime12H(selectedTime)}</p>}
+          </div>
+        ) : (
+          filteredStudents.map(student => {
+            const isPresent = !!attendanceStatus[student.id];
+            const streak = student.consecutiveAbsences || 0; 
+            const showAlert = !isPresent && streak >= 2 && !dismissedAlerts.includes(student.id);
 
-          return (
-            <div key={student.id} className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-all ${isPresent ? 'bg-white border-gray-200' : 'bg-red-50 border-red-100'}`}>
-              
-              <div className="flex flex-col">
-                <span className={`font-bold ${isPresent ? 'text-gray-800' : 'text-red-700'}`}>{student.name}</span>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Gr {student.grade}</span>
-                  {showAlert && (
-                    <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2">
-                      <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded-full">⚠️ {streak}d</span>
-                      <button onClick={(e) => sendAbsentAlert(student, streak, e)} className="bg-green-500 text-white p-1 rounded-full hover:bg-green-600 shadow-sm z-20 relative"><MessageCircle size={14} /></button>
-                      <button onClick={(e) => { e.stopPropagation(); setDismissedAlerts(prev => [...prev, student.id]); }} className="text-gray-400 p-1 z-20 relative"><X size={14} /></button>
-                    </div>
-                  )}
+            return (
+              <div key={student.id} className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-all ${isPresent ? 'bg-white border-gray-200' : 'bg-red-50 border-red-100'}`}>
+                
+                <div className="flex flex-col">
+                  <span className={`font-bold ${isPresent ? 'text-gray-800' : 'text-red-700'}`}>{student.name}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Gr {student.grade}</span>
+                    {showAlert && (
+                      <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2">
+                        <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded-full">⚠️ {streak}d</span>
+                        <button onClick={(e) => sendAbsentAlert(student, streak, e)} className="bg-green-500 text-white p-1 rounded-full hover:bg-green-600 shadow-sm z-20 relative"><MessageCircle size={14} /></button>
+                        <button onClick={(e) => { e.stopPropagation(); setDismissedAlerts(prev => [...prev, student.id]); }} className="text-gray-400 p-1 z-20 relative"><X size={14} /></button>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              {/* ROBUST TOGGLE SWITCH */}
-              <div 
-                onClick={() => toggleAttendance(student.id)}
-                className={`relative w-14 h-8 rounded-full cursor-pointer transition-colors duration-200 ease-in-out flex items-center p-1 z-10 ${isPresent ? 'bg-green-500' : 'bg-gray-300'}`}
-              >
+                {/* ROBUST TOGGLE SWITCH */}
                 <div 
-                  className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out flex items-center justify-center ${isPresent ? 'translate-x-6' : 'translate-x-0'}`}
+                  onClick={() => toggleAttendance(student.id)}
+                  className={`relative w-14 h-8 rounded-full cursor-pointer transition-colors duration-200 ease-in-out flex items-center p-1 z-10 ${isPresent ? 'bg-green-500' : 'bg-gray-300'}`}
                 >
-                  {isPresent ? <Check size={14} className="text-green-600" /> : <X size={14} className="text-gray-400" />}
+                  <div 
+                    className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out flex items-center justify-center ${isPresent ? 'translate-x-6' : 'translate-x-0'}`}
+                  >
+                    {isPresent ? <Check size={14} className="text-green-600" /> : <X size={14} className="text-gray-400" />}
+                  </div>
                 </div>
-              </div>
 
-            </div>
-          );
-        })}
+              </div>
+            );
+          })
+        )}
       </div>
 
       <div className="fixed bottom-20 left-4 right-4 z-30">

@@ -135,7 +135,8 @@ const App: React.FC = () => {
             gender: x.gender,
             notes: x.notes,
             joinedDate: x.joined_date,
-            photo: x.photo
+            photo: x.photo,
+            lastReminderSentAt: x.last_reminder_sent_at
          }));
          setStudents(mappedStudents);
        }
@@ -154,7 +155,14 @@ const App: React.FC = () => {
 
        if (fRes.data) {
           setFeeRecords(fRes.data.map((x: any) => ({
-             id: x.id, studentId: x.student_id, amount: x.amount, date: x.paid_date
+             id: x.id, 
+             studentId: x.student_id, 
+             amount: x.amount, 
+             date: x.paid_date, 
+             notes: x.notes, 
+             receiptSent: x.receipt_sent,
+             billingMonth: x.billing_month,
+             nextDueDate: x.next_due_date
           })));
        }
 
@@ -174,7 +182,7 @@ const App: React.FC = () => {
   // --- CRUD HANDLERS (UPDATED FOR OFFLINE SYNC) ---
 
   const addStudent = async (s: Student): Promise<boolean> => {
-    // 1. Local Duplicate Check (Since DB might be unreachable)
+    // 1. Local Duplicate Check
     const mobileToCheck = s.mobileNumber?.trim();
     if (mobileToCheck) {
       const match = students.find(st => st.mobileNumber === mobileToCheck);
@@ -193,7 +201,6 @@ const App: React.FC = () => {
     setStudents(prev => [...prev, s]);
 
     // 3. Sync Mutation (UPSERT)
-    // Map camelCase to snake_case for DB
     const dbPayload = {
       id: s.id, 
       admission_number: s.admissionNumber || '', 
@@ -205,7 +212,8 @@ const App: React.FC = () => {
       gender: s.gender || 'Male',
       notes: s.notes || '', 
       joined_date: s.joinedDate || null, 
-      photo: s.photo || null
+      photo: s.photo || null,
+      last_reminder_sent_at: s.lastReminderSentAt || null
     };
 
     return await syncMutation('students', 'UPSERT', dbPayload);
@@ -225,7 +233,8 @@ const App: React.FC = () => {
       gender: s.gender,
       notes: s.notes, 
       joined_date: s.joinedDate, 
-      photo: s.photo
+      photo: s.photo,
+      last_reminder_sent_at: s.lastReminderSentAt
     };
     syncMutation('students', 'UPSERT', dbPayload);
   };
@@ -233,28 +242,21 @@ const App: React.FC = () => {
   const deleteStudent = async (id: string) => {
     if (!dbClient) return;
     
-    // 1. Ask for confirmation (Double check)
-    // Note: The UI modal already asks, but this is safe. 
-    
     const toastId = toast.loading("Deleting student and related data...");
 
     try {
-      // 2. Delete Child Records FIRST (To satisfy Foreign Keys)
+      // Delete Child Records FIRST
       await dbClient.from('fees').delete().eq('student_id', id);
       await dbClient.from('exams').delete().eq('student_id', id);
-      // Add other related tables if any (e.g. attendance if strictly linked)
 
-      // 3. Delete the Student LAST
+      // Delete the Student LAST
       const { error } = await dbClient.from('students').delete().eq('id', id);
 
       if (error) throw error;
 
       toast.success("Student deleted successfully!", { id: toastId });
       
-      // 4. Refresh UI
       fetchAllData();
-      
-      // 5. Close Modal if open (Optional, handled by StudentManager usually)
       
     } catch (error: any) {
       console.error("Delete Error:", error);
@@ -294,8 +296,6 @@ const App: React.FC = () => {
         return [...prev, r];
      });
 
-     // Using UPSERT simplifies offline logic (replaces delete+insert dance)
-     // Ensure ID is consistent or passed correctly from AttendanceTracker
      const dbPayload = {
         id: r.id, 
         class_id: r.classId, 
@@ -308,10 +308,32 @@ const App: React.FC = () => {
   const addFee = (r: FeeRecord) => {
      setFeeRecords(prev => [...prev, r]);
      const dbPayload = {
-        id: r.id, student_id: r.studentId, amount: r.amount, paid_date: r.date
+        id: r.id, 
+        student_id: r.studentId, 
+        amount: r.amount, 
+        paid_date: r.date, 
+        notes: r.notes, 
+        receipt_sent: r.receiptSent,
+        billing_month: r.billingMonth,
+        next_due_date: r.nextDueDate
      };
      syncMutation('fees', 'UPSERT', dbPayload);
   };
+
+  const updateFee = (r: FeeRecord) => {
+    setFeeRecords(prev => prev.map(rec => rec.id === r.id ? r : rec));
+    const dbPayload = {
+       id: r.id, 
+       student_id: r.studentId, 
+       amount: r.amount, 
+       paid_date: r.date, 
+       notes: r.notes, 
+       receipt_sent: r.receiptSent,
+       billing_month: r.billingMonth,
+       next_due_date: r.nextDueDate
+    };
+    syncMutation('fees', 'UPSERT', dbPayload);
+ };
 
   const deleteFee = (id: string) => {
      setFeeRecords(prev => prev.filter(r => r.id !== id));
@@ -416,7 +438,9 @@ const App: React.FC = () => {
                 students={students}
                 feeRecords={feeRecords}
                 onAddFeeRecord={addFee}
+                onUpdateFeeRecord={updateFee}
                 onDeleteFeeRecord={deleteFee}
+                onUpdateStudent={updateStudent}
              />;
       case 'marks':
         return <MarksTracker 

@@ -16,3 +16,11 @@ export const formatSLNumber = (num: string) => {
   }
   return cleaned; // Return as is if unknown format
 };
+
+export const formatTime12H = (time24: string) => {
+  if (!time24) return '';
+  const [hours, minutes] = time24.split(':').map(Number);
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  const hour12 = hours % 12 || 12;
+  return `${hour12}:${minutes.toString().padStart(2, '0')} ${suffix}`;
+};

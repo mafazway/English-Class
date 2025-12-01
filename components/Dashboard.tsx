@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Student, ClassGroup, AttendanceRecord, FeeRecord, View, ExamRecord } from '../types';
-import { Users, CheckCircle, FileSpreadsheet, AlertCircle, Save, Cloud, CalendarDays, MoreVertical, Plus, BarChart3, TrendingUp, CreditCard, RefreshCw, Upload, Sun, Bell, Wifi, WifiOff, UploadCloud } from 'lucide-react';
+import { Users, CheckCircle, FileSpreadsheet, AlertCircle, Save, Cloud, CalendarDays, MoreVertical, Plus, BarChart3, TrendingUp, CreditCard, RefreshCw, Upload, Sun, Wifi, WifiOff, UploadCloud } from 'lucide-react';
 import { Card } from './UIComponents';
 import AnalyticsSummary from './AnalyticsSummary';
 
@@ -22,7 +22,6 @@ interface Props {
   pendingSyncCount?: number;
 }
 
-// Fixed: Added Type Definitions for Props
 const CircularProgress = ({ 
   value, 
   max = 4, 
@@ -55,6 +54,8 @@ const CircularProgress = ({
 };
 
 const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords, examRecords, onRestoreData, onNavigate, onBackupComplete, lastBackupDate, cloudConnected, onRefreshData, onAddStudentClick, isOnline = true, pendingSyncCount = 0 }) => {
+  
+  // --- EXISTING STATE ---
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -101,7 +102,6 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
       const joinedDay = joinDate.getDate();
 
       // 3. Calculate Next Due Date (Joined + Payments)
-      // Note: Removed the '+ 1' month to ensure immediate first month due logic applies correctly
       const nextDueDate = new Date(joinDate);
       nextDueDate.setMonth(joinDate.getMonth() + paymentCount);
 
@@ -119,31 +119,6 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
 
     return { overdueCount };
   }, [students, feeRecords]);
-
-  // Consecutive Absence Logic
-  const absentAlerts = useMemo(() => {
-     if (attendance.length === 0) return [];
-     const alerts: {student: Student, streak: number}[] = [];
-     const uniqueClassIds = Array.from(new Set(attendance.map(r => r.classId)));
-     
-     students.forEach(student => {
-        let maxStreak = 0;
-        uniqueClassIds.forEach(classId => {
-           const classHistory = attendance
-              .filter(r => r.classId === classId)
-              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-              .slice(0, 5); 
-           let streak = 0;
-           for (const record of classHistory) {
-              if (!record.studentIdsPresent.includes(student.id)) streak++;
-              else break;
-           }
-           if (streak > maxStreak) maxStreak = streak;
-        });
-        if (maxStreak >= 2) alerts.push({ student, streak: maxStreak });
-     });
-     return alerts;
-  }, [students, attendance]);
 
   // Handlers
   const handleExport = async () => {
@@ -227,6 +202,8 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // --- RENDER DASHBOARD ---
+
   return (
     <div className="flex flex-col h-full bg-gray-50/50" onClick={() => setIsMenuOpen(false)}>
       
@@ -262,6 +239,7 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
            {onRefreshData && (
               <button onClick={(e) => {e.stopPropagation(); onRefreshData()}} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"><RefreshCw size={18} /></button>
            )}
+           
            <button onClick={(e) => {e.stopPropagation(); setIsMenuOpen(!isMenuOpen)}} className="p-2 text-gray-800 hover:bg-gray-100 rounded-full transition-colors"><MoreVertical size={20} /></button>
            
            {/* Smart Dropdown */}
@@ -400,7 +378,7 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
          
          {/* Footer Info */}
          <div className="flex-shrink-0 text-center pb-1">
-            <p className="text-[9px] text-gray-300 font-medium">English Class Academy • v2.2 (PWA)</p>
+            <p className="text-[9px] text-gray-300 font-medium">English Class Academy • v2.3 (PWA)</p>
          </div>
 
       </div>

@@ -1,12 +1,16 @@
-declare namespace NodeJS {
-  interface ProcessEnv {
-    API_KEY: string;
-    [key: string]: string | undefined;
-  }
-}
+export {};
 
-interface Navigator {
-  contacts?: {
-    select: (properties: string[], options?: { multiple: boolean }) => Promise<any[]>;
-  };
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      API_KEY: string;
+      [key: string]: string | undefined;
+    }
+  }
+
+  interface Navigator {
+    contacts?: {
+      select: (properties: string[], options?: { multiple: boolean }) => Promise<any[]>;
+    };
+  }
 }

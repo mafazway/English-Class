@@ -1,3 +1,4 @@
+
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import toast from 'react-hot-toast';
@@ -92,8 +93,8 @@ export const useOfflineSync = (supabase: SupabaseClient | null) => {
         if (error) throw error;
         successCount++;
         
-      } catch (e) {
-        console.error("Sync failed for item:", item, e);
+      } catch (e: any) {
+        console.error("Sync failed for item:", item, e?.message || e);
         failedItems.push(item);
       }
     }
@@ -133,8 +134,8 @@ export const useOfflineSync = (supabase: SupabaseClient | null) => {
 
         if (error) throw error;
         return true; 
-      } catch (e) {
-        console.warn("Direct cloud save failed. Fallback to queue.", e);
+      } catch (e: any) {
+        console.warn("Direct cloud save failed. Fallback to queue.", e?.message || e);
       }
     }
 

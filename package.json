@@ -1,5 +1,5 @@
 {
-  "name": "student-manager-app",
+  "name": "english-class-academy",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -10,15 +10,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@google/genai": "^0.2.1",
     "@supabase/supabase-js": "^2.39.7",
+    "jspdf": "^2.5.1",
+    "jspdf-autotable": "^3.8.2",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
-    "xlsx": "^0.18.5",
-    "@google/genai": "^0.1.1",
-    "jspdf": "^2.5.1",
-    "jspdf-autotable": "^3.8.2"
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^20.11.24",

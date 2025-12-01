@@ -1,10 +1,10 @@
-import React from 'react';
+import React, { ReactNode } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { Toaster } from 'react-hot-toast';
 
 interface ErrorBoundaryProps {
-  children?: React.ReactNode;
+  children?: ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -14,8 +14,9 @@ interface ErrorBoundaryState {
 
 // Error Boundary to catch runtime crashes
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false, error: null };
-  
+  // Explicitly declare state property to satisfy TypeScript strict checks
+  public state: ErrorBoundaryState = { hasError: false, error: null };
+
   static getDerivedStateFromError(error: any): ErrorBoundaryState { 
     return { hasError: true, error }; 
   }

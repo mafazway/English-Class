@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { ClassGroup } from '../types';
 import { Trash2, Clock, X, Edit2, Coffee, Check, Filter, Share2, Plus, Calendar, LayoutGrid, List, ChevronRight } from 'lucide-react';
 import { Button, Input, Select } from './UIComponents';
+import { formatTime12H } from '../utils';
 
 interface Props {
   classes: ClassGroup[];
@@ -208,6 +209,7 @@ const Timetable: React.FC<Props> = ({ classes, onAddClass, onUpdateClass, onDele
     startObj.setHours(hours, minutes);
     const endObj = new Date(startObj.getTime() + durationMins * 60000);
     
+    // Format range for display string (e.g. 5:00 PM - 6:00 PM)
     const formatTime = (date: Date) => date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     const timeRange = `${formatTime(startObj)} - ${formatTime(endObj)}`;
     const scheduleDisplay = `${formData.day.slice(0, 3)} ${timeRange}`;
@@ -226,14 +228,6 @@ const Timetable: React.FC<Props> = ({ classes, onAddClass, onUpdateClass, onDele
       onAddClass(classData);
     }
     setIsModalOpen(false);
-  };
-
-  const formatTime12H = (time24: string) => {
-     if (!time24) return '';
-     const [h, m] = time24.split(':').map(Number);
-     const date = new Date();
-     date.setHours(h, m);
-     return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   };
 
   const handleCopySchedule = () => {
@@ -265,7 +259,7 @@ const Timetable: React.FC<Props> = ({ classes, onAddClass, onUpdateClass, onDele
             <h2 className="text-2xl font-bold text-gray-800">Timetable</h2>
             <div className="flex items-center gap-1 text-[10px] font-medium text-gray-400">
                <Clock size={10} />
-               {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+               {currentTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
             </div>
           </div>
           

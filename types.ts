@@ -12,6 +12,7 @@ export interface Student {
   joinedDate: string; // YYYY-MM-DD - Determines the billing cycle day
   photo?: string; // Base64 string of the student's photo
   consecutiveAbsences?: number; // Added for attendance tracking
+  lastReminderSentAt?: string; // ISO Timestamp for fee reminders
 }
 
 export interface ClassGroup {
@@ -35,6 +36,9 @@ export interface FeeRecord {
   date: string; // Payment date YYYY-MM-DD
   amount: number;
   notes?: string;
+  receiptSent?: boolean; // Track if WhatsApp receipt was sent
+  billingMonth?: string; // ISO Date string representing the month paid for
+  nextDueDate?: string; // ISO Date string for the next deadline
 }
 
 export interface ExamRecord {

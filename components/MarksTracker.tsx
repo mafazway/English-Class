@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Student, ExamRecord } from '../types';
-import { Plus, TrendingUp, TrendingDown, Minus, Sparkles, Trash2, BarChart3, X, Calendar, User, Trophy, Activity, History, Layers, Save, AlertCircle, AlertTriangle, Edit2, Search } from 'lucide-react';
+import { Plus, TrendingUp, TrendingDown, Minus, Sparkles, Trash2, BarChart3, X, Calendar, User, Trophy, Activity, History, Layers, Save, AlertCircle, AlertTriangle, Edit2, Search, ChevronDown, Share2, Copy, MessageCircle, Check } from 'lucide-react';
 import { Button, Card, Input, Select } from './UIComponents';
 import { analyzeExamPerformance } from '../services/geminiService';
 import toast from 'react-hot-toast';
@@ -22,6 +22,7 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState(''); // Search State
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState(''); // Grade Filter State
   const [formData, setFormData] = useState({
     studentId: '',
     testName: '',
@@ -40,11 +41,19 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
   const [bulkDate, setBulkDate] = useState(new Date().toISOString().slice(0, 10));
   const [bulkMarks, setBulkMarks] = useState<Record<string, string>>({}); // { studentId: score }
 
+  // --- Share / Leaderboard State ---
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareExamName, setShareExamName] = useState('');
+  const [generatedShareText, setGeneratedShareText] = useState('');
+  const [isCopied, setIsCopied] = useState(false);
+  const [showTop10Only, setShowTop10Only] = useState(false);
+
   // --- Derived Data ---
 
-  // Unique Grades for Dropdown
+  // Unique Grades for Dropdown (Numerically Sorted)
   const uniqueGrades = useMemo(() => {
-    return Array.from(new Set(students.map(s => s.grade))).sort();
+    return Array.from(new Set(students.map(s => s.grade || 'Unknown')))
+      .sort((a: string, b: string) => a.localeCompare(b, undefined, { numeric: true }));
   }, [students]);
 
   // Bulk Students List
@@ -55,23 +64,35 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [students, bulkGrade]);
 
-  // 1. Overview Records (Filtered by Search or Recent 5)
+  // 1. Overview Records (Filtered by Search, Grade, or Recent 5)
   const filteredOverviewRecords = useMemo(() => {
-    // If search is empty, return only last 5 records
-    if (!searchTerm.trim()) {
-      return [...examRecords]
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-        .slice(0, 5);
+    let records = [...examRecords].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    // 1. Filter by Grade
+    if (selectedGradeFilter) {
+      records = records.filter(r => {
+        const student = students.find(s => s.id === r.studentId);
+        return student && student.grade === selectedGradeFilter;
+      });
     }
 
-    // If searching, filter all records
-    const term = searchTerm.toLowerCase();
-    return examRecords.filter(r => {
-       const student = students.find(s => s.id === r.studentId);
-       const sName = student ? student.name.toLowerCase() : '';
-       return sName.includes(term) || r.testName.toLowerCase().includes(term);
-    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [examRecords, searchTerm, students]);
+    // 2. Filter by Search
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      records = records.filter(r => {
+         const student = students.find(s => s.id === r.studentId);
+         const sName = student ? student.name.toLowerCase() : '';
+         return sName.includes(term) || r.testName.toLowerCase().includes(term);
+      });
+    }
+
+    // 3. Default: Show recent 5 if no filters active
+    if (!searchTerm.trim() && !selectedGradeFilter) {
+      return records.slice(0, 5);
+    }
+
+    return records;
+  }, [examRecords, searchTerm, selectedGradeFilter, students]);
 
   // 2. Selected Student History
   const studentRecords = useMemo(() => {
@@ -222,6 +243,87 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
     return s ? s.name : 'Unknown Student';
   };
 
+  // --- SHARE LOGIC ---
+  const availableExamsForGrade = useMemo(() => {
+    if (!selectedGradeFilter) return [];
+    // Get unique test names for this grade
+    const gradeStudentIds = students.filter(s => s.grade === selectedGradeFilter).map(s => s.id);
+    const exams = examRecords.filter(r => gradeStudentIds.includes(r.studentId));
+    return Array.from(new Set(exams.map(r => r.testName))).sort();
+  }, [selectedGradeFilter, students, examRecords]);
+
+  const openShareModal = () => {
+    if (!selectedGradeFilter) {
+      toast.error("Please select a Grade first.");
+      return;
+    }
+    setShareExamName('');
+    setGeneratedShareText('');
+    setShowTop10Only(false); // Default to false
+    setIsShareModalOpen(true);
+  };
+
+  const generateLeaderboard = (useTop10 = showTop10Only) => {
+    if (!shareExamName) return;
+
+    // 1. Get Records
+    const gradeStudentIds = students.filter(s => s.grade === selectedGradeFilter).map(s => s.id);
+    const relevantRecords = examRecords.filter(r => 
+      gradeStudentIds.includes(r.studentId) && r.testName === shareExamName
+    );
+
+    // 2. Sort by Percentage Descending
+    relevantRecords.sort((a, b) => {
+       const pctA = a.score / a.total;
+       const pctB = b.score / b.total;
+       return pctB - pctA;
+    });
+
+    // 3. Filter Top 10 if needed
+    const displayedRecords = useTop10 ? relevantRecords.slice(0, 10) : relevantRecords;
+
+    // 4. Build String
+    let text = `🏆 *Grade ${selectedGradeFilter} - ${shareExamName.replace(/ - English$/i, '')} Results* 🏆\n`;
+    text += `Subject: English ${useTop10 ? '(Top 10)' : ''}\n\n`;
+
+    if (displayedRecords.length === 0) {
+       text += "No records found.";
+    } else {
+       displayedRecords.forEach((r, idx) => {
+          const student = students.find(s => s.id === r.studentId);
+          if (!student) return;
+
+          const rank = idx + 1;
+          const pct = Math.round((r.score / r.total) * 100);
+          
+          let prefix = `${rank < 10 ? '0' : ''}${rank}.`;
+          if (rank === 1) prefix = '🥇';
+          if (rank === 2) prefix = '🥈';
+          if (rank === 3) prefix = '🥉';
+
+          text += `${prefix} *${student.name.split(' ')[0]}* - ${pct}%\n`;
+       });
+    }
+
+    text += `\nEnglish Class Academy`;
+    setGeneratedShareText(text);
+  };
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(generatedShareText);
+    setIsCopied(true);
+    toast.success("Copied to clipboard!");
+    setTimeout(() => setIsCopied(false), 2000);
+  };
+
+  const shareViaWhatsApp = () => {
+    if (generatedShareText.length > 2000) {
+      alert("Text is too long for a direct WhatsApp link. Please copy and paste manually.");
+      return;
+    }
+    window.open(`https://whatsapp.com/send?text=${encodeURIComponent(generatedShareText)}`, '_blank');
+  };
+
   return (
     <div className="pb-24 space-y-4">
       {/* Header & View Toggle */}
@@ -251,7 +353,12 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
             <div className="relative flex-1">
                <Select 
                  value={selectedStudentId} 
-                 onChange={e => { setSelectedStudentId(e.target.value); setAnalysisResult(''); setSearchTerm(''); }}
+                 onChange={e => { 
+                    setSelectedStudentId(e.target.value); 
+                    setAnalysisResult(''); 
+                    setSearchTerm(''); 
+                    setSelectedGradeFilter(''); // Reset filters when selecting specific student
+                 }}
                  className="!mb-0 !border-gray-200 !bg-gray-50 !rounded-xl !py-2.5 !text-sm"
                >
                  <option value="">Overview (Search / Recent)</option>
@@ -382,22 +489,51 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
         {/* ================= INDIVIDUAL VIEW ================= */}
         {viewMode === 'individual' && !selectedStudentId && (
           <div className="space-y-4 animate-fade-in px-3">
-             {/* Search Bar */}
-             <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Search student name..." 
-                  value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                />
+             {/* Search Bar & Grade Filter */}
+             <div className="flex gap-2">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input 
+                      type="text" 
+                      placeholder="Search student name..." 
+                      value={searchTerm}
+                      onChange={e => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                    />
+                </div>
+                
+                {/* Grade Filter Dropdown */}
+                <div className="relative w-1/3 min-w-[120px]">
+                    <select 
+                      value={selectedGradeFilter}
+                      onChange={(e) => setSelectedGradeFilter(e.target.value)}
+                      className="w-full h-full pl-3 pr-8 py-2.5 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm font-medium appearance-none"
+                    >
+                      <option value="">All Grades</option>
+                      {uniqueGrades.map(g => (
+                        <option key={g} value={g}>Grade {g}</option>
+                      ))}
+                    </select>
+                    <div className="absolute inset-y-0 right-0 pr-2 flex items-center pointer-events-none text-gray-400">
+                        <ChevronDown size={14} />
+                    </div>
+                </div>
+
+                {/* SHARE BUTTON */}
+                <button 
+                  onClick={openShareModal}
+                  className={`px-3 rounded-xl border flex items-center justify-center transition-all ${selectedGradeFilter ? 'bg-white border-gray-200 text-gray-600 hover:text-indigo-600' : 'bg-gray-50 border-gray-100 text-gray-300'}`}
+                  disabled={!selectedGradeFilter}
+                  title="Share Results"
+                >
+                   <Share2 size={18} />
+                </button>
              </div>
 
              <div className="flex items-center gap-2 text-gray-500 mb-2">
                 <History size={16} />
                 <span className="text-sm font-bold uppercase tracking-wide">
-                   {searchTerm ? 'Search Results' : 'Recently Added'}
+                   {(searchTerm || selectedGradeFilter) ? 'Filtered Results' : 'Recently Added'}
                 </span>
              </div>
 
@@ -405,7 +541,7 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
                <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border border-dashed border-gray-200">
                  <BarChart3 size={48} className="mx-auto mb-2 opacity-20" />
                  <p className="text-sm">No records found.</p>
-                 {!searchTerm && <p className="text-xs">Tap the + button to add one.</p>}
+                 {!searchTerm && !selectedGradeFilter && <p className="text-xs">Tap the + button to add one.</p>}
                </div>
              ) : (
               filteredOverviewRecords.map(record => {
@@ -630,6 +766,121 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* SHARE RESULTS MODAL */}
+      {isShareModalOpen && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4 animate-fade-in backdrop-blur-sm">
+           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl p-6 animate-scale-in">
+              <div className="flex justify-between items-center mb-4">
+                 <h3 className="text-lg font-bold text-gray-800 flex items-center gap-2">
+                    <Share2 size={20} className="text-indigo-600"/> Share Results
+                 </h3>
+                 <button onClick={() => setIsShareModalOpen(false)} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+              </div>
+
+              {!generatedShareText ? (
+                 <div className="space-y-4">
+                    <p className="text-sm text-gray-600">
+                       Select an exam to generate a leaderboard for <strong>Grade {selectedGradeFilter}</strong>.
+                    </p>
+                    <div>
+                       <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Select Exam</label>
+                       <select 
+                          value={shareExamName} 
+                          onChange={(e) => {
+                             setShareExamName(e.target.value);
+                             setGeneratedShareText(''); // Reset on exam change
+                          }}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
+                       >
+                          <option value="">-- Choose Exam --</option>
+                          {availableExamsForGrade.map(name => (
+                             <option key={name} value={name}>{name}</option>
+                          ))}
+                       </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 py-2">
+                        <input
+                          type="checkbox"
+                          id="top10"
+                          checked={showTop10Only}
+                          onChange={(e) => {
+                             const newVal = e.target.checked;
+                             setShowTop10Only(newVal);
+                          }}
+                          className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300"
+                        />
+                        <label htmlFor="top10" className="text-sm text-gray-700 font-medium">Show Top 10 Only</label>
+                    </div>
+
+                    <Button 
+                       onClick={() => generateLeaderboard()} 
+                       disabled={!shareExamName}
+                       className="w-full"
+                    >
+                       Generate Leaderboard
+                    </Button>
+                 </div>
+              ) : (
+                 <div className="space-y-4">
+                    
+                    <div className="flex items-center gap-2 py-2 bg-gray-50 rounded-lg px-3 border border-gray-100">
+                        <input
+                          type="checkbox"
+                          id="top10-generated"
+                          checked={showTop10Only}
+                          onChange={(e) => {
+                             const newVal = e.target.checked;
+                             setShowTop10Only(newVal);
+                             generateLeaderboard(newVal); // Auto-regenerate text
+                          }}
+                          className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300"
+                        />
+                        <label htmlFor="top10-generated" className="text-xs text-gray-700 font-bold">Show Top 10 Only</label>
+                    </div>
+
+                    <div className="relative">
+                       <textarea 
+                          readOnly 
+                          value={generatedShareText} 
+                          className="w-full h-48 p-3 rounded-xl border border-gray-200 bg-gray-50 text-xs font-mono resize-none focus:outline-none"
+                       />
+                       <button 
+                          onClick={copyToClipboard}
+                          className="absolute top-2 right-2 p-1.5 bg-white rounded-lg shadow-sm border border-gray-200 text-gray-500 hover:text-indigo-600"
+                          title="Copy"
+                       >
+                          {isCopied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                       </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                       <button 
+                          onClick={copyToClipboard}
+                          className="flex items-center justify-center gap-2 py-3 bg-gray-100 text-gray-700 font-bold rounded-xl hover:bg-gray-200 transition-colors"
+                       >
+                          <Copy size={18} /> Copy
+                       </button>
+                       <button 
+                          onClick={shareViaWhatsApp}
+                          className="flex items-center justify-center gap-2 py-3 bg-green-500 text-white font-bold rounded-xl hover:bg-green-600 shadow-lg shadow-green-200 transition-colors"
+                       >
+                          <MessageCircle size={18} /> WhatsApp
+                       </button>
+                    </div>
+                    
+                    <button 
+                       onClick={() => setGeneratedShareText('')}
+                       className="w-full text-center text-xs text-gray-400 hover:text-gray-600 mt-2 underline"
+                    >
+                       Generate for different exam
+                    </button>
+                 </div>
+              )}
+           </div>
         </div>
       )}
     </div>
