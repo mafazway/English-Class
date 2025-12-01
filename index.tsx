@@ -3,11 +3,8 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { Toaster } from 'react-hot-toast';
 
-// PWA registration removed to prevent "Failed to load" errors in preview
-// import { registerSW } from 'virtual:pwa-register'; 
-
 interface ErrorBoundaryProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
 }
 
 interface ErrorBoundaryState {
@@ -17,10 +14,7 @@ interface ErrorBoundaryState {
 
 // Error Boundary to catch runtime crashes
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) { 
-    super(props); 
-    this.state = { hasError: false, error: null }; 
-  }
+  state: ErrorBoundaryState = { hasError: false, error: null };
   
   static getDerivedStateFromError(error: any): ErrorBoundaryState { 
     return { hasError: true, error }; 
@@ -54,6 +48,17 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
     }
     return this.props.children;
   }
+}
+
+// Register Service Worker manually for Vercel/PWA support
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').then(registration => {
+      console.log('SW registered: ', registration);
+    }).catch(registrationError => {
+      console.log('SW registration failed: ', registrationError);
+    });
+  });
 }
 
 const rootElement = document.getElementById('root');

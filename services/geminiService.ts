@@ -1,12 +1,12 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
 
-// Initialize the Google Generative AI client
+import { GoogleGenAI } from "@google/genai";
+
+// Initialize the Google GenAI client
 // The API key must be obtained from process.env.API_KEY
-const apiKey = process.env.API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
-// Using gemini-1.5-flash as a stable default for this SDK
-const MODEL_NAME = "gemini-1.5-flash";
+// Using gemini-2.5-flash as the new standard model
+const MODEL_NAME = "gemini-2.5-flash";
 
 export const generateParentMessage = async (
   studentName: string,
@@ -15,13 +15,6 @@ export const generateParentMessage = async (
   tone: 'formal' | 'friendly' | 'concerned'
 ): Promise<string> => {
   try {
-    if (!apiKey) {
-      console.warn("Gemini API Key is missing");
-      return "AI Service Unavailable (Key Missing).";
-    }
-
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-
     const prompt = `
       Act as an English tuition teacher.
       Write a short, professional WhatsApp message to a parent.
@@ -34,9 +27,11 @@ export const generateParentMessage = async (
       Keep it concise (under 100 words). Include placeholders for date/time if relevant.
     `;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+    });
+    return response.text || "";
   } catch (error) {
     console.error("Gemini Error:", error);
     return "Failed to generate message. Please try again.";
@@ -49,10 +44,6 @@ export const generateLessonPlan = async (
   duration: string
 ): Promise<string> => {
   try {
-    if (!apiKey) return "AI Service Unavailable (Key Missing)";
-
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-
     const prompt = `
       Create a brief English lesson plan.
       Topic: ${topic}
@@ -68,9 +59,11 @@ export const generateLessonPlan = async (
       Use simple markdown formatting.
     `;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+    });
+    return response.text || "";
   } catch (error) {
     console.error("Gemini Error:", error);
     return "Failed to generate lesson plan.";
@@ -83,10 +76,6 @@ export const analyzeStudentProgress = async (
   notes: string
 ): Promise<string> => {
   try {
-    if (!apiKey) return "AI Service Unavailable (Key Missing)";
-    
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-
     const prompt = `
       Provide a brief 2-sentence summary of a student's standing for an English teacher's internal notes.
       Student: ${studentName}
@@ -96,9 +85,11 @@ export const analyzeStudentProgress = async (
       Suggest one area of focus for the next class.
     `;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+    });
+    return response.text || "";
   } catch (error) {
     console.error("Gemini Error:", error);
     return "Analysis unavailable due to error.";
@@ -110,10 +101,6 @@ export const analyzeExamPerformance = async (
   history: { date: string; testName: string; score: number; total: number }[]
 ): Promise<string> => {
   try {
-    if (!apiKey) return "AI Service Unavailable (Key Missing)";
-
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-
     const historyStr = history.map(h => `- ${h.date} (${h.testName}): ${h.score}/${h.total}`).join('\n');
     const prompt = `
       Analyze the evolution of test marks for a student named ${studentName}.
@@ -127,9 +114,11 @@ export const analyzeExamPerformance = async (
       3. Give 1 encouraging remark or advice for the teacher.
     `;
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text();
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+    });
+    return response.text || "";
   } catch (error) {
     console.error("Gemini Error:", error);
     return "Analysis unavailable due to error.";
@@ -138,17 +127,12 @@ export const analyzeExamPerformance = async (
 
 export const generateContent = async (prompt: string) => {
   try {
-    if (!apiKey) {
-      console.warn("Gemini API Key is missing. Please check your .env file.");
-      return "AI Service Unavailable (Key Missing)";
-    }
-
-    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+    });
     
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    
-    return response.text();
+    return response.text || "";
   } catch (error) {
     console.error("Error generating content:", error);
     return "Failed to generate content. Please try again.";

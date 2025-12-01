@@ -172,8 +172,9 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
     let savedCount = 0;
 
     entries.forEach(([studentId, scoreStr]) => {
-      if (scoreStr.trim() === '') return;
-      const score = parseFloat(scoreStr);
+      const str = scoreStr as string;
+      if (str.trim() === '') return;
+      const score = parseFloat(str);
       
       if (!isNaN(score)) {
         if (score > total) {
