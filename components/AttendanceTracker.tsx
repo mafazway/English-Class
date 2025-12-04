@@ -120,25 +120,29 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
      let streak = 0;
 
      for (const dayDate of sortedDates) {
+        // STRICT RULE: Ignore Non-Class Days (Tue, Wed, Thu, Fri)
+        const d = new Date(dayDate);
+        const dayOfWeek = d.getDay();
+        if (![0, 1, 6].includes(dayOfWeek)) continue; 
+
         const daysRecords = recordsByDate[dayDate];
         
         // A. Check for Cancellation (Global or Specific)
-        // If a 'general' cancellation exists, it overrides specific grade records
-        const isCancelled = daysRecords.some(r => {
+        const isDayCancelled = daysRecords.some(r => {
             const rClass = normalize(r.classId);
             const sGrade = normalize(student.grade);
-            const applies = r.classId === 'general' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
+            const applies = r.classId === 'general' || r.classId === 'All' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
             return applies && r.status === 'cancelled';
         });
 
-        if (isCancelled) continue; // Skip cancelled days completely
+        if (isDayCancelled) continue; // Skip cancelled days completely
 
         // B. Check Attendance
+        // Look for ANY active record that applies to this student for this day
         const activeRecord = daysRecords.find(r => {
             const rClass = normalize(r.classId);
             const sGrade = normalize(student.grade);
-            const applies = r.classId === 'general' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
-            // We already filtered cancelled ones above, but ensure we pick one that ISN'T cancelled if mixed types exist
+            const applies = r.classId === 'general' || r.classId === 'All' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
             return applies && r.status !== 'cancelled';
         });
 
@@ -149,6 +153,9 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
                  streak++; // Absent -> Streak Continues
              }
         }
+        // If no record exists for this valid class day (and not cancelled), 
+        // we generally assume no class was held or teacher forgot. 
+        // We do NOT increment streak to avoid false positives.
      }
      return streak;
   };
