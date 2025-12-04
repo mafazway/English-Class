@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Student, FeeRecord, ExamRecord } from '../types';
-import { Plus, User, Phone, Search, X, Edit2, Trash2, Camera, Contact, MessageCircle, Image as ImageIcon, Hash, Filter, MoreVertical, UserCircle, CheckCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, User, Phone, Search, X, Edit2, Trash2, Camera, Contact, MessageCircle, Filter, UserCircle, CheckCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button, Card, Input, TextArea, Select } from './UIComponents';
 import toast from 'react-hot-toast';
 import { formatSLNumber } from '../utils';

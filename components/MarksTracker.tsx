@@ -1,8 +1,8 @@
 
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Student, ExamRecord } from '../types';
-import { Plus, TrendingUp, TrendingDown, Minus, Sparkles, Trash2, BarChart3, X, Calendar, User, Trophy, Activity, History, Layers, Save, AlertCircle, AlertTriangle, Edit2, Search, ChevronDown, Share2, Copy, MessageCircle, Check } from 'lucide-react';
-import { Button, Card, Input, Select } from './UIComponents';
+import { Plus, Sparkles, Trash2, BarChart3, X, Trophy, Activity, History, Layers, Save, AlertTriangle, Edit2, Search, ChevronDown, Share2, Copy, MessageCircle, Check } from 'lucide-react';
+import { Button, Input, Select } from './UIComponents';
 import { analyzeExamPerformance } from '../services/geminiService';
 import toast from 'react-hot-toast';
 
