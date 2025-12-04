@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, ClassGroup, AttendanceRecord } from '../types';
-import { Save, Calendar as CalendarIcon, Check, X, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle, CalendarOff, CheckCheck, Coffee, ArrowRight } from 'lucide-react';
+import { Save, Calendar as CalendarIcon, Check, X, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle, CalendarOff, CheckCheck, Coffee, ArrowRight, AlertTriangle, Search } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface AttendanceTrackerProps {
@@ -153,9 +153,6 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
                  streak++; // Absent -> Streak Continues
              }
         }
-        // If no record exists for this valid class day (and not cancelled), 
-        // we generally assume no class was held or teacher forgot. 
-        // We do NOT increment streak to avoid false positives.
      }
      return streak;
   };
@@ -313,6 +310,17 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
         {/* Filters - Only show on valid days */}
         {isClassDay && (
           <>
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <input 
+                type="text" 
+                placeholder="Search student..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-700 placeholder-gray-400 transition-colors text-sm font-medium"
+              />
+            </div>
+
             <div className="flex gap-3">
               <div className="flex-1 relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><GraduationCap size={16} className="text-gray-400" /></div>
@@ -389,30 +397,33 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
                 <div key={student.id} className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-all ${isPresent ? 'bg-white border-gray-200' : 'bg-red-50 border-red-100'}`}>
                   
                   <div className="flex flex-col flex-1 min-w-0 pr-2">
-                    <span className={`font-bold text-lg truncate ${isPresent ? 'text-gray-800' : 'text-red-700'}`}>{student.name}</span>
+                    {/* Name and WhatsApp Icon Row */}
+                    <div className="flex items-center gap-2">
+                       <span className={`font-bold text-lg truncate ${isPresent ? 'text-gray-800' : 'text-red-700'}`}>{student.name}</span>
+                       {showAlert && (
+                          <button 
+                             onClick={(e) => sendAbsentAlert(student, currentStreak, e)} 
+                             className={`p-1.5 rounded-full transition-transform active:scale-90 shadow-sm border flex items-center justify-center ${
+                               isContacted 
+                                 ? 'bg-green-100 border-green-200 text-green-600' 
+                                 : 'bg-green-500 border-green-600 text-white hover:bg-green-600'
+                             }`}
+                             title={isContacted ? "Message Sent" : "Send WhatsApp Notice"}
+                          >
+                             {isContacted ? <CheckCheck size={14} strokeWidth={3} /> : <MessageCircle size={14} fill="currentColor" className="text-white" />}
+                          </button>
+                       )}
+                    </div>
+                    
+                    {/* Grade and Alert Badge Row */}
                     <div className="flex items-center flex-wrap gap-2 mt-1">
                       <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider whitespace-nowrap">Gr {student.grade}</span>
                       
                       {showAlert && (
-                        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2 bg-white/50 p-0.5 rounded-full flex-shrink-0">
-                          <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded-full shadow-sm whitespace-nowrap">
-                             ⚠️ {currentStreak} Days Absent
-                          </span>
-                          
-                          {isContacted ? (
-                             <div className="bg-green-100 text-green-600 p-1 rounded-full border border-green-200" title="Message Sent">
-                                <CheckCheck size={14} />
-                             </div>
-                          ) : (
-                             <button 
-                               onClick={(e) => sendAbsentAlert(student, currentStreak, e)} 
-                               className="bg-green-500 text-white p-1.5 rounded-full hover:bg-green-600 shadow-sm active:scale-90 transition-transform"
-                               title="Send WhatsApp Notice"
-                             >
-                               <MessageCircle size={14} />
-                             </button>
-                          )}
-                        </div>
+                        <span className="text-[10px] font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100 flex items-center gap-1 animate-pulse">
+                            <AlertTriangle size={10} strokeWidth={3} />
+                            {currentStreak} Days Absent
+                        </span>
                       )}
                     </div>
                   </div>
@@ -452,3 +463,4 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
 };
 
 export default AttendanceTracker;
+    
