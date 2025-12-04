@@ -1,4 +1,6 @@
 
+
+
 import { createClient } from '@supabase/supabase-js'
 import { CloudConfig } from '../types';
 
@@ -38,6 +40,7 @@ alter table students add column if not exists notes text;
 alter table students add column if not exists joined_date text;
 alter table students add column if not exists photo text;
 alter table students add column if not exists last_reminder_sent_at text;
+alter table students add column if not exists last_inquiry_sent_date text;
 
 alter table students enable row level security;
 drop policy if exists "Public Access Students" on students;
@@ -74,6 +77,8 @@ alter table attendance alter column id type text;
 alter table attendance alter column class_id type text;
 alter table attendance add column if not exists date text;
 alter table attendance add column if not exists student_ids_present text[];
+alter table attendance add column if not exists contacted_absentees text[];
+alter table attendance add column if not exists status text;
 
 alter table attendance enable row level security;
 drop policy if exists "Public Access Attendance" on attendance;

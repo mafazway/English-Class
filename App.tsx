@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Student, ClassGroup, AttendanceRecord, FeeRecord, ExamRecord, View, CloudConfig } from './types';
 import Dashboard from './components/Dashboard';
@@ -136,7 +135,8 @@ const App: React.FC = () => {
             notes: x.notes,
             joinedDate: x.joined_date,
             photo: x.photo,
-            lastReminderSentAt: x.last_reminder_sent_at
+            lastReminderSentAt: x.last_reminder_sent_at,
+            lastInquirySentDate: x.last_inquiry_sent_date
          }));
          setStudents(mappedStudents);
        }
@@ -149,7 +149,12 @@ const App: React.FC = () => {
 
        if (aRes.data) {
          setAttendance(aRes.data.map((x: any) => ({
-            id: x.id, classId: x.class_id, date: x.date, studentIdsPresent: x.student_ids_present || []
+            id: x.id, 
+            classId: x.class_id, 
+            date: x.date, 
+            studentIdsPresent: x.student_ids_present || [], 
+            contactedAbsentees: x.contacted_absentees || [],
+            status: x.status
          })));
        }
 
@@ -213,7 +218,8 @@ const App: React.FC = () => {
       notes: s.notes || '', 
       joined_date: s.joinedDate || null, 
       photo: s.photo || null,
-      last_reminder_sent_at: s.lastReminderSentAt || null
+      last_reminder_sent_at: s.lastReminderSentAt || null,
+      last_inquiry_sent_date: s.lastInquirySentDate || null
     };
 
     return await syncMutation('students', 'UPSERT', dbPayload);
@@ -234,7 +240,8 @@ const App: React.FC = () => {
       notes: s.notes, 
       joined_date: s.joinedDate, 
       photo: s.photo,
-      last_reminder_sent_at: s.lastReminderSentAt
+      last_reminder_sent_at: s.lastReminderSentAt,
+      last_inquiry_sent_date: s.lastInquirySentDate
     };
     syncMutation('students', 'UPSERT', dbPayload);
   };
@@ -300,7 +307,9 @@ const App: React.FC = () => {
         id: r.id, 
         class_id: r.classId, 
         date: r.date, 
-        student_ids_present: r.studentIdsPresent
+        student_ids_present: r.studentIdsPresent,
+        contacted_absentees: r.contactedAbsentees,
+        status: r.status // Add Status
      };
      syncMutation('attendance', 'UPSERT', dbPayload);
   };

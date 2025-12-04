@@ -1,8 +1,7 @@
-
 import React, { useState } from 'react';
 import { Student, FeeRecord } from '../types';
 import { ChevronDown, Check, X, DollarSign, MessageCircle, Trash2, ChevronLeft, ChevronRight, ArrowRight, Search, AlertCircle, FileText, Download, Calendar, Send, History, CheckCheck } from 'lucide-react';
-import { toast } from 'react-hot-toast';
+import toast from 'react-hot-toast';
 
 interface FeeTrackerProps {
   students: Student[];

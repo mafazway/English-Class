@@ -14,8 +14,7 @@ interface ErrorBoundaryState {
 
 // Error Boundary to catch runtime crashes
 class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  // Explicitly declare state property to satisfy TypeScript strict checks
-  public state: ErrorBoundaryState = { hasError: false, error: null };
+  state: ErrorBoundaryState = { hasError: false, error: null };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState { 
     return { hasError: true, error }; 
@@ -47,7 +46,8 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
         </div>
       );
     }
-    return this.props.children;
+    // Fix: Explicitly cast 'this' to any to access props if TS fails to infer it from React.Component
+    return (this as any).props.children;
   }
 }
 

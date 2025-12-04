@@ -1,9 +1,8 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Student, ClassGroup, AttendanceRecord } from '../types';
-import { Save, Calendar as CalendarIcon, Check, X, RotateCcw, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle } from 'lucide-react';
-import { toast } from 'react-hot-toast';
-import { formatTime12H } from '../utils';
+import { Save, Calendar as CalendarIcon, Check, X, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle, CalendarOff, CheckCheck, Coffee, ArrowRight } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 interface AttendanceTrackerProps {
   students: Student[];
@@ -18,100 +17,145 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
   const [date, setDate] = useState(getTodayString());
   const [selectedClassId, setSelectedClassId] = useState<string>('All');
   const [selectedTime, setSelectedTime] = useState<string>('All');
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Attendance State
   const [attendanceStatus, setAttendanceStatus] = useState<Record<string, boolean>>({});
-  const [dismissedAlerts, setDismissedAlerts] = useState<string[]>([]);
+  
+  // Communication State
+  const [contactedAbsentees, setContactedAbsentees] = useState<string[]>([]);
 
   // Unique Options
   const uniqueStartTimes = ['All', ...Array.from(new Set(classes.map(c => c.startTime))).sort()];
   const uniqueClasses = ['All', ...Array.from(new Set(classes.map(c => c.name))).sort()];
 
-  // --- HELPER: Consistent Day Name ---
-  // Avoids timezone shifts by parsing YYYY-MM-DD as UTC
-  const getDayName = (dateStr: string) => {
-    const parts = dateStr.split('-');
-    if (parts.length !== 3) return '';
-    const d = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    return days[d.getUTCDay()];
+  // Helper: Format Time
+  const formatTime12Hour = (time24: string) => {
+    if (!time24 || time24 === 'All') return 'All Times';
+    const [hours, minutes] = time24.split(':');
+    let h = parseInt(hours, 10);
+    const suffix = h >= 12 ? 'PM' : 'AM';
+    h = h % 12 || 12;
+    return `${h}:${minutes} ${suffix}`;
   };
 
-  const currentDayName = getDayName(date);
+  // Helper: Normalize String for Comparison
+  const normalize = (str: string | undefined) => {
+    if (!str) return '';
+    return str.toString().replace(/\D/g, ''); 
+  };
 
-  // --- STRICT FILTERING LOGIC ---
-  const filteredStudents = students.filter(s => {
-    // 1. Grade Matching (Manual Filter)
-    let matchesGrade = true;
-    if (selectedClassId !== 'All') {
-      const classNum = selectedClassId.match(/\d+/);
-      const studentNum = s.grade?.match(/\d+/);
-      if (classNum && studentNum) {
-        if (classNum[0] !== studentNum[0]) matchesGrade = false;
-      } else {
-         if (!s.grade?.includes(selectedClassId)) matchesGrade = false; 
+  // --- DAY VALIDATION LOGIC ---
+  const isClassDay = useMemo(() => {
+    const dayIndex = new Date(date).getDay();
+    // 0 = Sunday, 1 = Monday, 6 = Saturday
+    return [0, 1, 6].includes(dayIndex);
+  }, [date]);
+
+  // --- FILTERING LOGIC ---
+  const filteredStudents = useMemo(() => {
+    if (!isClassDay) return [];
+
+    return students.filter(s => {
+      if (searchTerm && !s.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+      if (selectedClassId !== 'All') {
+        const classNum = normalize(selectedClassId);
+        const studentNum = normalize(s.grade);
+        if (classNum && studentNum) {
+          if (classNum !== studentNum) return false;
+        } else {
+          if (s.grade !== selectedClassId) return false;
+        }
       }
-    }
 
-    // 2. Time & Day Matching (Timetable Check)
-    let matchesTime = true;
-    if (selectedTime !== 'All') {
-      // Find classes that are actually scheduled for this DATE (Day) and TIME
-      const activeClasses = classes.filter(c => 
-         c.startTime === selectedTime && c.day === currentDayName
-      );
-
-      if (s.grade) {
-         // Check if student belongs to one of these active classes
-         // Robust check: Compare numeric part of grade to avoid "1" matching "10"
-         const studentGradeNum = s.grade.match(/\d+/)?.[0];
-
-         matchesTime = activeClasses.some(c => {
-             const classGradeNum = c.name.match(/\d+/)?.[0];
-             if (studentGradeNum && classGradeNum) {
-                 return studentGradeNum === classGradeNum;
-             }
-             // Fallback for non-numeric names
-             return c.name.toLowerCase().includes(s.grade.toLowerCase());
-         });
-      } else {
-         matchesTime = false;
+      if (selectedTime !== 'All') {
+        const classesAtTime = classes.filter(c => c.startTime === selectedTime);
+        const studentNum = normalize(s.grade);
+        const matchesTime = classesAtTime.some(c => normalize(c.name) === studentNum);
+        if (!matchesTime) return false;
       }
-    }
+      return true;
+    });
+  }, [students, searchTerm, selectedClassId, selectedTime, classes, isClassDay]);
 
-    return matchesGrade && matchesTime;
-  });
+  // --- RECORD & STATUS LOGIC ---
+  const currentRecord = useMemo(() => {
+    const targetId = selectedClassId === 'All' ? 'general' : selectedClassId;
+    return attendanceRecords.find(r => r.date === date && r.classId === targetId);
+  }, [attendanceRecords, date, selectedClassId]);
 
-  // Load Existing Attendance
+  const isCancelled = currentRecord?.status === 'cancelled';
+
+  // Load Status and Contacted List
   useEffect(() => {
-    // Also strictly filter attendance record loading by class/time if needed
-    // But usually we just look for a record for this Date + ClassID
-    // If selectedClassId is 'All', we rely on the filteredStudents loop below to check presence
-    const record = attendanceRecords.find(r => r.date === date && (selectedClassId === 'All' || r.classId === selectedClassId));
-    
     const statusMap: Record<string, boolean> = {};
-    
-    // Iterate over FILTERED students to prep status
     filteredStudents.forEach(s => {
-       // If specific record found, use it. 
-       // If "All" view, we might need to check multiple records? 
-       // Simplification: In 'All' view, we just check if student ID is in ANY record for this date? 
-       // For now, retaining existing logic which works for single-class marking mostly.
-       // Improved: Look for any record on this date containing the student
-       if (selectedClassId === 'All') {
-          const anyRecordToday = attendanceRecords.find(r => r.date === date && r.studentIdsPresent.includes(s.id));
-          statusMap[s.id] = !!anyRecordToday;
-       } else {
-          statusMap[s.id] = record ? record.studentIdsPresent.includes(s.id) : false;
-       }
+      statusMap[s.id] = currentRecord ? currentRecord.studentIdsPresent.includes(s.id) : false;
     });
     setAttendanceStatus(statusMap);
-  }, [date, selectedClassId, selectedTime, attendanceRecords, students.length]); // Re-run when students list changes (filtered)
+    
+    if (currentRecord?.contactedAbsentees) {
+      setContactedAbsentees(currentRecord.contactedAbsentees);
+    } else {
+      setContactedAbsentees([]);
+    }
+  }, [date, selectedClassId, selectedTime, currentRecord, filteredStudents]);
 
-  // --- FIXED TOGGLE FUNCTION ---
+  // --- REAL-TIME ABSENCE LOGIC (STREAK CALCULATION) ---
+  const getAbsentStreak = (student: Student) => {
+     // 1. Get all past records
+     const pastRecords = attendanceRecords.filter(r => r.date < date);
+     
+     // 2. Group by Date to handle potential duplicates (e.g. 'general' vs 'grade')
+     const recordsByDate: Record<string, AttendanceRecord[]> = {};
+     pastRecords.forEach(r => {
+        if (!recordsByDate[r.date]) recordsByDate[r.date] = [];
+        recordsByDate[r.date].push(r);
+     });
+
+     // 3. Sort Dates Descending (Recent -> Oldest)
+     const sortedDates = Object.keys(recordsByDate).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
+
+     let streak = 0;
+
+     for (const dayDate of sortedDates) {
+        const daysRecords = recordsByDate[dayDate];
+        
+        // A. Check for Cancellation (Global or Specific)
+        // If a 'general' cancellation exists, it overrides specific grade records
+        const isCancelled = daysRecords.some(r => {
+            const rClass = normalize(r.classId);
+            const sGrade = normalize(student.grade);
+            const applies = r.classId === 'general' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
+            return applies && r.status === 'cancelled';
+        });
+
+        if (isCancelled) continue; // Skip cancelled days completely
+
+        // B. Check Attendance
+        const activeRecord = daysRecords.find(r => {
+            const rClass = normalize(r.classId);
+            const sGrade = normalize(student.grade);
+            const applies = r.classId === 'general' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
+            // We already filtered cancelled ones above, but ensure we pick one that ISN'T cancelled if mixed types exist
+            return applies && r.status !== 'cancelled';
+        });
+
+        if (activeRecord) {
+             if (activeRecord.studentIdsPresent.includes(student.id)) {
+                 break; // Present -> Streak Broken
+             } else {
+                 streak++; // Absent -> Streak Continues
+             }
+        }
+     }
+     return streak;
+  };
+
+  // --- ACTIONS ---
   const toggleAttendance = (id: string) => {
-    setAttendanceStatus(prev => {
-      const newState = { ...prev, [id]: !prev[id] };
-      return newState;
-    });
+    setAttendanceStatus(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
   const markAll = (isPresent: boolean) => {
@@ -121,15 +165,50 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     toast.success(isPresent ? "Marked all Present" : "Reset all");
   };
 
+  const handleToggleCancel = () => {
+    const classIdToSave = selectedClassId !== 'All' ? selectedClassId : 'general';
+    const recordId = currentRecord?.id || crypto.randomUUID();
+
+    if (isCancelled) {
+      // Restore
+      onSaveAttendance({
+        id: recordId,
+        classId: classIdToSave,
+        date: date,
+        studentIdsPresent: [],
+        contactedAbsentees: [], // Reset contacts on restore
+        status: 'active'
+      });
+      toast.success("Class Restored");
+    } else {
+      // Cancel
+      if (!window.confirm("Are you sure you want to CANCEL this class?")) return;
+      onSaveAttendance({
+        id: recordId,
+        classId: classIdToSave,
+        date: date,
+        studentIdsPresent: [],
+        contactedAbsentees: [],
+        status: 'cancelled'
+      });
+      toast.success("Class Cancelled");
+    }
+  };
+
   const handleSave = () => {
+    if (!isClassDay) return; // Prevent saving on invalid days
+    
     const classIdToSave = selectedClassId !== 'All' ? selectedClassId : 'general'; 
+    const recordId = currentRecord?.id || crypto.randomUUID();
     const presentIds = Object.keys(attendanceStatus).filter(id => attendanceStatus[id]);
     
     onSaveAttendance({
-      id: crypto.randomUUID(),
+      id: recordId,
       classId: classIdToSave,
       date: date,
-      studentIdsPresent: presentIds
+      studentIdsPresent: presentIds,
+      contactedAbsentees: contactedAbsentees, // Save the list of messaged parents
+      status: 'active'
     });
     toast.success("Attendance Saved!");
   };
@@ -139,8 +218,22 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     d.setDate(d.getDate() + days);
     setDate(d.toISOString().split('T')[0]);
   };
+  
+  const jumpToNextClassDay = () => {
+     const d = new Date(date);
+     // Find the next Sat (6), Sun (0), or Mon (1)
+     let count = 0;
+     while (count < 7) {
+        d.setDate(d.getDate() + 1);
+        const day = d.getDay();
+        if (day === 0 || day === 1 || day === 6) {
+           setDate(d.toISOString().split('T')[0]);
+           return;
+        }
+        count++;
+     }
+  };
 
-  // Helper for WhatsApp
   const formatSLNumber = (num: string) => {
     const cleaned = num.replace(/\D/g, '');
     if (cleaned.length === 10 && cleaned.startsWith('0')) return '94' + cleaned.substring(1);
@@ -149,32 +242,59 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     return cleaned;
   };
 
-  const sendAbsentAlert = (student: Student, streak: number, e: React.MouseEvent) => {
+  const sendAbsentAlert = (student: Student, daysAbsent: number, e: React.MouseEvent) => {
     e.stopPropagation();
     const number = student.whatsappNumber || student.mobileNumber;
     if (!number) return toast.error("No number found");
-    const message = `⚠️ *தொடர் வருகையின்மை (Consecutive Absence)*\n\nஅஸ்ஸலாமு அலைக்கும்,\n\nகடந்த *${streak} வகுப்புகளுக்கு* தொடர்ந்து *${student.name}* சமூகமளிக்கவில்லை என்பதைத் தெரிவித்துக்கொள்கிறோம்.\n\nகாரணத்தை அறியத் தந்தால் உதவியாக இருக்கும்.\n\nநன்றி,\nEnglish Class Academy.`;
+    
+    // Tamil Message
+    const message = `அஸ்ஸலாமு அலைக்கும். ${student.name} கடந்த சில நாட்களாக (${daysAbsent} Days) வகுப்பிற்கு வரவில்லை. பிள்ளையின் நலன் கருதி, வராததற்கான காரணத்தை அறியத் தந்தால் உதவியாக இருக்கும்.\nநன்றி.`;
+    
     window.open(`https://wa.me/${formatSLNumber(number)}?text=${encodeURIComponent(message)}`, '_blank');
+    
+    // Mark as Contacted Locally
+    if (!contactedAbsentees.includes(student.id)) {
+       setContactedAbsentees(prev => [...prev, student.id]);
+    }
   };
 
   return (
-    <div className="p-4 pb-24 space-y-5 bg-gray-50 min-h-full">
-      {/* --- HEADER UI (User Preferred) --- */}
+    <div className="p-4 pb-32 space-y-5 bg-gray-50 min-h-full">
+      {/* HEADER */}
       <div className="bg-white p-4 rounded-3xl shadow-sm border border-gray-100 mb-4">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-gray-800">Attendance</h2>
-          <div className="flex gap-2">
-             <button onClick={() => markAll(false)} className="p-2 bg-gray-100 text-gray-600 rounded-lg hover:text-red-500" title="Reset"><RotateCcw size={18} /></button>
-             <button onClick={() => markAll(true)} className="px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-lg">Mark All</button>
-          </div>
+          
+          {/* Controls - Only show on valid class days */}
+          {isClassDay && (
+            <div className="flex gap-2">
+               {!isCancelled && (
+                  <>
+                    <button onClick={() => markAll(false)} className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-200 hover:text-gray-800">Reset</button>
+                    <button onClick={() => markAll(true)} className="px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-lg hover:bg-indigo-100">Mark All</button>
+                  </>
+               )}
+               
+               {/* CANCEL TOGGLE BUTTON */}
+               <button 
+                  onClick={handleToggleCancel}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-lg flex items-center gap-1 border transition-colors ${
+                    isCancelled 
+                      ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' 
+                      : 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100'
+                  }`}
+               >
+                  {isCancelled ? 'Restore Class' : 'Cancel Class'}
+               </button>
+            </div>
+          )}
         </div>
 
-        {/* Date Navigator */}
+        {/* Date Selector */}
         <div className="flex items-center justify-between bg-white border border-gray-200 p-2 rounded-2xl mb-4 shadow-sm">
           <button onClick={() => changeDate(-1)} className="p-3 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl"><ChevronLeft size={20} /></button>
           <div className="text-center">
-            {/* Display accurate Day Name derived from helper */}
-            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">{currentDayName}</div>
+            <div className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-0.5">{new Date(date).toLocaleDateString('en-US', { weekday: 'long' })}</div>
             <div className="flex items-center gap-2 text-lg font-extrabold text-indigo-900">
               <CalendarIcon size={18} className="text-indigo-500 mb-1" />
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent outline-none cursor-pointer w-auto text-center" />
@@ -183,84 +303,143 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
           <button onClick={() => changeDate(1)} className="p-3 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl"><ChevronRight size={20} /></button>
         </div>
 
-        {/* Filters */}
-        <div className="flex gap-3">
-          <div className="flex-1 relative group">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><GraduationCap size={16} className="text-gray-400" /></div>
-            <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} className="w-full pl-10 pr-4 py-3.5 bg-white border border-gray-200 rounded-2xl text-sm font-bold text-gray-700 outline-none appearance-none cursor-pointer">
-              {uniqueClasses.map(c => <option key={c} value={c}>{c === 'All' ? 'All Grades' : c}</option>)}
-            </select>
-          </div>
-          <div className="flex-1 relative group">
-            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Clock size={16} className="text-gray-400" /></div>
-            <select value={selectedTime} onChange={(e) => setSelectedTime(e.target.value)} className="w-full pl-10 pr-4 py-3.5 bg-white border border-gray-200 rounded-2xl text-sm font-bold text-gray-700 outline-none appearance-none cursor-pointer">
-              {uniqueStartTimes.map(t => (
-                <option key={t} value={t}>{t === 'All' ? 'All Times' : formatTime12H(t)}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-        
-        {/* Count Banner */}
-        <div className="mt-4 bg-indigo-50 py-2 px-4 rounded-xl flex justify-between items-center">
-           <span className="text-xs font-bold text-indigo-600">Students Found: {filteredStudents.length}</span>
-           {selectedTime !== 'All' && <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">{currentDayName} • {formatTime12H(selectedTime)}</span>}
-        </div>
-      </div>
-
-      {/* STUDENT LIST */}
-      <div className="space-y-3">
-        {filteredStudents.length === 0 ? (
-          <div className="text-center py-10 text-gray-400">
-            <p>No students found.</p>
-            {selectedTime !== 'All' && <p className="text-xs mt-1">Check Timetable for {currentDayName} @ {formatTime12H(selectedTime)}</p>}
-          </div>
-        ) : (
-          filteredStudents.map(student => {
-            const isPresent = !!attendanceStatus[student.id];
-            const streak = student.consecutiveAbsences || 0; 
-            const showAlert = !isPresent && streak >= 2 && !dismissedAlerts.includes(student.id);
-
-            return (
-              <div key={student.id} className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-all ${isPresent ? 'bg-white border-gray-200' : 'bg-red-50 border-red-100'}`}>
-                
-                <div className="flex flex-col">
-                  <span className={`font-bold ${isPresent ? 'text-gray-800' : 'text-red-700'}`}>{student.name}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium">Gr {student.grade}</span>
-                    {showAlert && (
-                      <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2">
-                        <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded-full">⚠️ {streak}d</span>
-                        <button onClick={(e) => sendAbsentAlert(student, streak, e)} className="bg-green-500 text-white p-1 rounded-full hover:bg-green-600 shadow-sm z-20 relative"><MessageCircle size={14} /></button>
-                        <button onClick={(e) => { e.stopPropagation(); setDismissedAlerts(prev => [...prev, student.id]); }} className="text-gray-400 p-1 z-20 relative"><X size={14} /></button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* ROBUST TOGGLE SWITCH */}
-                <div 
-                  onClick={() => toggleAttendance(student.id)}
-                  className={`relative w-14 h-8 rounded-full cursor-pointer transition-colors duration-200 ease-in-out flex items-center p-1 z-10 ${isPresent ? 'bg-green-500' : 'bg-gray-300'}`}
-                >
-                  <div 
-                    className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-200 ease-in-out flex items-center justify-center ${isPresent ? 'translate-x-6' : 'translate-x-0'}`}
-                  >
-                    {isPresent ? <Check size={14} className="text-green-600" /> : <X size={14} className="text-gray-400" />}
-                  </div>
-                </div>
-
+        {/* Filters - Only show on valid days */}
+        {isClassDay && (
+          <>
+            <div className="flex gap-3">
+              <div className="flex-1 relative group">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><GraduationCap size={16} className="text-gray-400" /></div>
+                <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} className="w-full pl-10 pr-4 py-3.5 bg-white border border-gray-200 rounded-2xl text-sm font-bold text-gray-700 outline-none appearance-none cursor-pointer">
+                  {uniqueClasses.map(c => <option key={c} value={c}>{c === 'All' ? 'All Grades' : c}</option>)}
+                </select>
               </div>
-            );
-          })
+              <div className="flex-1 relative group">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Clock size={16} className="text-gray-400" /></div>
+                <select value={selectedTime} onChange={(e) => setSelectedTime(e.target.value)} className="w-full pl-10 pr-4 py-3.5 bg-white border border-gray-200 rounded-2xl text-sm font-bold text-gray-700 outline-none appearance-none cursor-pointer">
+                  {uniqueStartTimes.map(t => <option key={t} value={t}>{t === 'All' ? 'All Times' : formatTime12Hour(t)}</option>)}
+                </select>
+              </div>
+            </div>
+            
+            <div className="mt-4 bg-indigo-50 py-2 px-4 rounded-xl flex justify-between items-center">
+              <span className="text-xs font-bold text-indigo-600">Students Found: {filteredStudents.length}</span>
+              {isCancelled && <span className="text-xs font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded">Cancelled</span>}
+            </div>
+          </>
         )}
       </div>
 
-      <div className="fixed bottom-20 left-4 right-4 z-30">
-        <button onClick={handleSave} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-200 flex items-center justify-center gap-2 active:scale-95 transition-transform">
-          <Save size={20} /> Save Attendance
-        </button>
-      </div>
+      {/* STATES: NO CLASS / CANCELLED / LIST */}
+      
+      {!isClassDay ? (
+         // INVALID DAY STATE
+         <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-gray-200 shadow-sm border-dashed animate-fade-in text-center px-6">
+            <div className="w-20 h-20 bg-gray-50 text-gray-400 rounded-full flex items-center justify-center mb-4 border border-gray-100">
+               <Coffee size={32} />
+            </div>
+            <h3 className="text-xl font-bold text-gray-800">No Classes Scheduled</h3>
+            <p className="text-gray-400 text-sm mt-2 max-w-[250px]">
+              Classes are only held on <strong>Saturdays</strong>, <strong>Sundays</strong>, and <strong>Mondays</strong>.
+            </p>
+            <button 
+               onClick={jumpToNextClassDay}
+               className="mt-6 flex items-center gap-2 bg-indigo-50 text-indigo-600 font-bold px-5 py-2.5 rounded-xl hover:bg-indigo-100 transition-colors"
+            >
+               Jump to Next Class <ArrowRight size={16} />
+            </button>
+         </div>
+      ) : isCancelled ? (
+         // CANCELLED STATE
+         <div className="flex flex-col items-center justify-center py-16 bg-white rounded-3xl border border-gray-200 shadow-sm border-dashed animate-fade-in">
+           <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mb-4 border border-red-100">
+               <CalendarOff size={32} />
+           </div>
+           <h3 className="text-xl font-bold text-gray-800">Class Cancelled</h3>
+           <p className="text-gray-400 text-sm mt-1 max-w-[250px] text-center">
+             Attendance marking is disabled for this day because the class was cancelled.
+           </p>
+           <button 
+             onClick={handleToggleCancel} 
+             className="mt-6 text-indigo-600 font-bold text-sm hover:underline bg-indigo-50 px-4 py-2 rounded-lg"
+           >
+             Restore Class & Attendance
+           </button>
+        </div>
+      ) : (
+        // ACTIVE STUDENT LIST
+        <div className="space-y-3">
+          {filteredStudents.length === 0 ? (
+            <div className="text-center py-10 text-gray-400">No students found.</div>
+          ) : (
+            filteredStudents.map(student => {
+              const isPresent = !!attendanceStatus[student.id];
+              const pastStreak = getAbsentStreak(student);
+              const currentStreak = isPresent ? 0 : pastStreak + 1;
+              const showAlert = !isPresent && currentStreak >= 2;
+              const isContacted = contactedAbsentees.includes(student.id);
+
+              return (
+                <div key={student.id} className={`p-4 rounded-xl shadow-sm border flex items-center justify-between transition-all ${isPresent ? 'bg-white border-gray-200' : 'bg-red-50 border-red-100'}`}>
+                  
+                  <div className="flex flex-col flex-1 min-w-0 pr-2">
+                    <span className={`font-bold text-lg truncate ${isPresent ? 'text-gray-800' : 'text-red-700'}`}>{student.name}</span>
+                    <div className="flex items-center flex-wrap gap-2 mt-1">
+                      <span className="text-[10px] bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-bold uppercase tracking-wider whitespace-nowrap">Gr {student.grade}</span>
+                      
+                      {showAlert && (
+                        <div className="flex items-center gap-1 animate-in fade-in slide-in-from-left-2 bg-white/50 p-0.5 rounded-full flex-shrink-0">
+                          <span className="text-[10px] font-bold text-white bg-red-500 px-2 py-0.5 rounded-full shadow-sm whitespace-nowrap">
+                             ⚠️ {currentStreak} Days Absent
+                          </span>
+                          
+                          {isContacted ? (
+                             <div className="bg-green-100 text-green-600 p-1 rounded-full border border-green-200" title="Message Sent">
+                                <CheckCheck size={14} />
+                             </div>
+                          ) : (
+                             <button 
+                               onClick={(e) => sendAbsentAlert(student, currentStreak, e)} 
+                               className="bg-green-500 text-white p-1.5 rounded-full hover:bg-green-600 shadow-sm active:scale-90 transition-transform"
+                               title="Send WhatsApp Notice"
+                             >
+                               <MessageCircle size={14} />
+                             </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => toggleAttendance(student.id)}
+                    className={`relative z-10 flex-shrink-0 px-4 py-2 rounded-lg font-bold text-xs transition-all flex items-center gap-2 shadow-sm border active:scale-95 ${
+                      isPresent 
+                        ? 'bg-green-500 text-white border-green-600 hover:bg-green-600' 
+                        : 'bg-white text-gray-400 border-gray-200 hover:border-red-300 hover:text-red-400'
+                    }`}
+                  >
+                    {isPresent ? (
+                      <> <Check size={16} strokeWidth={3} /> PRESENT </>
+                    ) : (
+                      <> <X size={16} strokeWidth={3} /> ABSENT </>
+                    )}
+                  </button>
+
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* SAVE BUTTON - Hide on invalid days or cancelled days */}
+      {isClassDay && !isCancelled && (
+        <div className="fixed bottom-20 left-4 right-4 z-30">
+          <button onClick={handleSave} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-200 flex items-center justify-center gap-2 active:scale-95 transition-transform">
+            <Save size={20} /> Save Attendance
+          </button>
+        </div>
+      )}
     </div>
   );
 };

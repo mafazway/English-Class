@@ -1,4 +1,5 @@
 
+
 export interface Student {
   id: string; // Internal UUID
   admissionNumber: string; // Visible Primary Key ID (e.g. 001)
@@ -13,6 +14,7 @@ export interface Student {
   photo?: string; // Base64 string of the student's photo
   consecutiveAbsences?: number; // Added for attendance tracking
   lastReminderSentAt?: string; // ISO Timestamp for fee reminders
+  lastInquirySentDate?: string; // ISO Timestamp for absence inquiries
 }
 
 export interface ClassGroup {
@@ -28,6 +30,8 @@ export interface AttendanceRecord {
   classId: string;
   date: string; // ISO date string YYYY-MM-DD
   studentIdsPresent: string[];
+  contactedAbsentees?: string[]; // IDs of absent students whose parents were contacted
+  status?: 'active' | 'cancelled'; // Added for cancellation support
 }
 
 export interface FeeRecord {
