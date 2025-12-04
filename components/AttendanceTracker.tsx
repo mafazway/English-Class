@@ -52,6 +52,15 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     return [0, 1, 6].includes(dayIndex);
   }, [date]);
 
+  // --- FUTURE DATE CHECK ---
+  const isFutureDate = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const selected = new Date(date);
+    selected.setHours(0, 0, 0, 0);
+    return selected > today;
+  }, [date]);
+
   // --- FILTERING LOGIC ---
   const filteredStudents = useMemo(() => {
     if (!isClassDay) return [];
@@ -303,6 +312,11 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
               <CalendarIcon size={18} className="text-indigo-500 mb-1" />
               <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent outline-none cursor-pointer w-auto text-center" />
             </div>
+            {isFutureDate && (
+               <div className="text-[9px] font-bold text-orange-500 bg-orange-50 px-2 py-0.5 rounded-full inline-block mt-1">
+                 Future Date
+               </div>
+            )}
           </div>
           <button onClick={() => changeDate(1)} className="p-3 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl"><ChevronRight size={20} /></button>
         </div>
@@ -389,8 +403,13 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
             filteredStudents.map(student => {
               const isPresent = !!attendanceStatus[student.id];
               const pastStreak = getAbsentStreak(student);
-              const currentStreak = isPresent ? 0 : pastStreak + 1;
-              const showAlert = !isPresent && currentStreak >= 2;
+              
+              // Only count current absence if it's NOT a future date AND NOT cancelled
+              const currentStreak = isPresent ? 0 : ((isFutureDate || isCancelled) ? 0 : pastStreak + 1);
+              
+              // Only show alerts if not in future
+              const showAlert = !isPresent && currentStreak >= 2 && !isFutureDate;
+              
               const isContacted = contactedAbsentees.includes(student.id);
 
               return (
@@ -463,4 +482,3 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
 };
 
 export default AttendanceTracker;
-    
