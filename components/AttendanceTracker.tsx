@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, ClassGroup, AttendanceRecord } from '../types';
-import { Save, Calendar as CalendarIcon, Check, X, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle, CalendarOff, CheckCheck, Coffee, ArrowRight, AlertTriangle, Search } from 'lucide-react';
+import { Save, Calendar as CalendarIcon, Check, X, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle, CalendarOff, CheckCheck, Coffee, ArrowRight, AlertTriangle, Search, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface AttendanceTrackerProps {
@@ -25,9 +25,9 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
   // Communication State
   const [contactedAbsentees, setContactedAbsentees] = useState<string[]>([]);
 
-  // Unique Options
-  const uniqueStartTimes = ['All', ...Array.from(new Set(classes.map(c => c.startTime))).sort()];
-  const uniqueClasses = ['All', ...Array.from(new Set(classes.map(c => c.name))).sort()];
+  // Unique Options - Trim whitespace to prevent duplicates (e.g. "Grade 6" vs "Grade 6 ")
+  const uniqueStartTimes = ['All', ...Array.from(new Set(classes.map(c => c.startTime ? c.startTime.trim() : ''))).filter(Boolean).sort()];
+  const uniqueClasses = ['All', ...Array.from(new Set(classes.map(c => c.name ? c.name.trim() : ''))).filter(Boolean).sort()];
 
   // Helper: Format Time
   const formatTime12Hour = (time24: string) => {
@@ -65,6 +65,11 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
   const filteredStudents = useMemo(() => {
     if (!isClassDay) return [];
 
+    // Force user to select a filter (Grade or Time) or search before showing list
+    if (selectedClassId === 'All' && selectedTime === 'All' && !searchTerm) {
+      return [];
+    }
+
     return students.filter(s => {
       if (searchTerm && !s.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
 
@@ -88,79 +93,93 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     });
   }, [students, searchTerm, selectedClassId, selectedTime, classes, isClassDay]);
 
-  // --- RECORD & STATUS LOGIC ---
-  const currentRecord = useMemo(() => {
-    const targetId = selectedClassId === 'All' ? 'general' : selectedClassId;
-    return attendanceRecords.find(r => r.date === date && r.classId === targetId);
-  }, [attendanceRecords, date, selectedClassId]);
+  const isWaitingForFilter = isClassDay && selectedClassId === 'All' && selectedTime === 'All' && !searchTerm;
 
-  const isCancelled = currentRecord?.status === 'cancelled';
+  // --- RECORD & STATUS LOGIC (HIERARCHICAL) ---
+  const generalRecord = useMemo(() => attendanceRecords.find(r => r.date === date && r.classId === 'general'), [attendanceRecords, date]);
+  const specificRecord = useMemo(() => selectedClassId === 'All' ? null : attendanceRecords.find(r => r.date === date && r.classId === selectedClassId), [attendanceRecords, date, selectedClassId]);
+
+  // Status Hierarchy: Specific > General
+  // If Specific Record exists (active/cancelled), use it.
+  // Else fall back to General Record.
+  const isCancelled = useMemo(() => {
+      if (selectedClassId === 'All') return generalRecord?.status === 'cancelled';
+      return specificRecord ? specificRecord.status === 'cancelled' : generalRecord?.status === 'cancelled';
+  }, [selectedClassId, generalRecord, specificRecord]);
+
 
   // Load Status and Contacted List
   useEffect(() => {
+    // 1. Calculate Presence based on ALL records for this day (Aggregate View)
     const statusMap: Record<string, boolean> = {};
-    filteredStudents.forEach(s => {
-      statusMap[s.id] = currentRecord ? currentRecord.studentIdsPresent.includes(s.id) : false;
+    const contactedSet = new Set<string>();
+
+    const todaysRecords = attendanceRecords.filter(r => r.date === date);
+
+    students.forEach(s => {
+       // Check if student is present in ANY record for today (Grade specific OR General)
+       const isPresentAnywhere = todaysRecords.some(r => r.studentIdsPresent.includes(s.id));
+       statusMap[s.id] = isPresentAnywhere;
     });
-    setAttendanceStatus(statusMap);
     
-    if (currentRecord?.contactedAbsentees) {
-      setContactedAbsentees(currentRecord.contactedAbsentees);
-    } else {
-      setContactedAbsentees([]);
-    }
-  }, [date, selectedClassId, selectedTime, currentRecord, filteredStudents]);
+    // Aggregate contacted status
+    todaysRecords.forEach(r => {
+        if(r.contactedAbsentees) {
+            r.contactedAbsentees.forEach(id => contactedSet.add(id));
+        }
+    });
+
+    setAttendanceStatus(statusMap);
+    setContactedAbsentees(Array.from(contactedSet));
+    
+  }, [date, attendanceRecords, students]);
 
   // --- REAL-TIME ABSENCE LOGIC (STREAK CALCULATION) ---
   const getAbsentStreak = (student: Student) => {
      // 1. Get all past records
      const pastRecords = attendanceRecords.filter(r => r.date < date);
      
-     // 2. Group by Date to handle potential duplicates (e.g. 'general' vs 'grade')
+     // 2. Group by Date
      const recordsByDate: Record<string, AttendanceRecord[]> = {};
      pastRecords.forEach(r => {
         if (!recordsByDate[r.date]) recordsByDate[r.date] = [];
         recordsByDate[r.date].push(r);
      });
 
-     // 3. Sort Dates Descending (Recent -> Oldest)
+     // 3. Sort Dates Descending
      const sortedDates = Object.keys(recordsByDate).sort((a, b) => new Date(b).getTime() - new Date(a).getTime());
 
      let streak = 0;
 
      for (const dayDate of sortedDates) {
-        // STRICT RULE: Ignore Non-Class Days (Tue, Wed, Thu, Fri)
+        // STRICT RULE: Ignore Non-Class Days
         const d = new Date(dayDate);
         const dayOfWeek = d.getDay();
         if (![0, 1, 6].includes(dayOfWeek)) continue; 
 
         const daysRecords = recordsByDate[dayDate];
         
-        // A. Check for Cancellation (Global or Specific)
-        const isDayCancelled = daysRecords.some(r => {
+        // Filter out cancelled records first
+        const activeRecords = daysRecords.filter(r => r.status !== 'cancelled');
+
+        if (activeRecords.length === 0) continue;
+
+        // CHECK 1: Was the student marked present in ANY record for this day?
+        const isPresent = activeRecords.some(r => r.studentIdsPresent.includes(student.id));
+
+        if (isPresent) {
+           break; // Streak ends (They were present)
+        }
+
+        // CHECK 2: If not present, did any record APPLY to them?
+        const wasExpected = activeRecords.some(r => {
             const rClass = normalize(r.classId);
             const sGrade = normalize(student.grade);
-            const applies = r.classId === 'general' || r.classId === 'All' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
-            return applies && r.status === 'cancelled';
+            return r.classId === 'general' || r.classId === 'All' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
         });
 
-        if (isDayCancelled) continue; // Skip cancelled days completely
-
-        // B. Check Attendance
-        // Look for ANY active record that applies to this student for this day
-        const activeRecord = daysRecords.find(r => {
-            const rClass = normalize(r.classId);
-            const sGrade = normalize(student.grade);
-            const applies = r.classId === 'general' || r.classId === 'All' || r.classId === student.grade || (rClass && sGrade && rClass === sGrade);
-            return applies && r.status !== 'cancelled';
-        });
-
-        if (activeRecord) {
-             if (activeRecord.studentIdsPresent.includes(student.id)) {
-                 break; // Present -> Streak Broken
-             } else {
-                 streak++; // Absent -> Streak Continues
-             }
+        if (wasExpected) {
+            streak++;
         }
      }
      return streak;
@@ -172,15 +191,20 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
   };
 
   const markAll = (isPresent: boolean) => {
+    if (filteredStudents.length === 0) return;
     const newStatus: Record<string, boolean> = { ...attendanceStatus };
     filteredStudents.forEach(s => newStatus[s.id] = isPresent);
     setAttendanceStatus(newStatus);
-    toast.success(isPresent ? "Marked all Present" : "Reset all");
+    toast.success(isPresent ? "Marked visible students Present" : "Reset visible students");
   };
 
   const handleToggleCancel = () => {
     const classIdToSave = selectedClassId !== 'All' ? selectedClassId : 'general';
-    const recordId = currentRecord?.id || crypto.randomUUID();
+    
+    // Determine ID: If we have a specific record matching our save target, use it. Otherwise new.
+    let recordId = crypto.randomUUID();
+    if (classIdToSave === 'general' && generalRecord) recordId = generalRecord.id;
+    if (classIdToSave !== 'general' && specificRecord) recordId = specificRecord.id;
 
     if (isCancelled) {
       // Restore
@@ -189,13 +213,13 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
         classId: classIdToSave,
         date: date,
         studentIdsPresent: [],
-        contactedAbsentees: [], // Reset contacts on restore
+        contactedAbsentees: [], 
         status: 'active'
       });
       toast.success("Class Restored");
     } else {
       // Cancel
-      if (!window.confirm("Are you sure you want to CANCEL this class?")) return;
+      if (!window.confirm(`Are you sure you want to CANCEL ${selectedClassId === 'All' ? 'ALL classes' : 'this class'} for today?`)) return;
       onSaveAttendance({
         id: recordId,
         classId: classIdToSave,
@@ -209,10 +233,15 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
   };
 
   const handleSave = () => {
-    if (!isClassDay) return; // Prevent saving on invalid days
+    if (!isClassDay) return; 
     
     const classIdToSave = selectedClassId !== 'All' ? selectedClassId : 'general'; 
-    const recordId = currentRecord?.id || crypto.randomUUID();
+    
+    // ID Resolution for Save
+    let recordId = crypto.randomUUID();
+    if (classIdToSave === 'general' && generalRecord) recordId = generalRecord.id;
+    if (classIdToSave !== 'general' && specificRecord) recordId = specificRecord.id;
+    
     const presentIds = Object.keys(attendanceStatus).filter(id => attendanceStatus[id]);
     
     onSaveAttendance({
@@ -220,7 +249,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
       classId: classIdToSave,
       date: date,
       studentIdsPresent: presentIds,
-      contactedAbsentees: contactedAbsentees, // Save the list of messaged parents
+      contactedAbsentees: contactedAbsentees,
       status: 'active'
     });
     toast.success("Attendance Saved!");
@@ -265,10 +294,30 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     
     window.open(`https://wa.me/${formatSLNumber(number)}?text=${encodeURIComponent(message)}`, '_blank');
     
-    // Mark as Contacted Locally
+    // 1. Update Local State
+    let updatedContactedList = [...contactedAbsentees];
     if (!contactedAbsentees.includes(student.id)) {
-       setContactedAbsentees(prev => [...prev, student.id]);
+       updatedContactedList.push(student.id);
+       setContactedAbsentees(updatedContactedList);
     }
+
+    // 2. IMMEDIATE SAVE to persist the 'Contacted' double-tick
+    // We reuse the logic from handleSave to ensure consistency
+    const classIdToSave = selectedClassId !== 'All' ? selectedClassId : 'general';
+    let recordId = crypto.randomUUID();
+    if (classIdToSave === 'general' && generalRecord) recordId = generalRecord.id;
+    if (classIdToSave !== 'general' && specificRecord) recordId = specificRecord.id;
+
+    const presentIds = Object.keys(attendanceStatus).filter(id => attendanceStatus[id]);
+
+    onSaveAttendance({
+      id: recordId,
+      classId: classIdToSave,
+      date: date,
+      studentIdsPresent: presentIds,
+      contactedAbsentees: updatedContactedList, // Use the updated list
+      status: 'active'
+    });
   };
 
   return (
@@ -281,7 +330,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
           {/* Controls - Only show on valid class days */}
           {isClassDay && (
             <div className="flex gap-2">
-               {!isCancelled && (
+               {!isCancelled && !isWaitingForFilter && (
                   <>
                     <button onClick={() => markAll(false)} className="px-3 py-1.5 bg-gray-100 text-gray-600 text-xs font-bold rounded-lg hover:bg-gray-200 hover:text-gray-800">Reset</button>
                     <button onClick={() => markAll(true)} className="px-3 py-1.5 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-lg hover:bg-indigo-100">Mark All</button>
@@ -394,11 +443,20 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
              Restore Class & Attendance
            </button>
         </div>
+      ) : isWaitingForFilter ? (
+        // WAITING FOR FILTER STATE
+        <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border border-dashed border-gray-300 animate-fade-in">
+            <div className="w-16 h-16 bg-indigo-50 text-indigo-300 rounded-full flex items-center justify-center mb-4">
+               <Filter size={32} />
+            </div>
+            <h3 className="text-lg font-bold text-gray-700">Select a Grade or Time</h3>
+            <p className="text-sm text-gray-400 mt-1">Please choose a filter to view students.</p>
+        </div>
       ) : (
         // ACTIVE STUDENT LIST
         <div className="space-y-3">
           {filteredStudents.length === 0 ? (
-            <div className="text-center py-10 text-gray-400">No students found.</div>
+            <div className="text-center py-10 text-gray-400">No students found matching your criteria.</div>
           ) : (
             filteredStudents.map(student => {
               const isPresent = !!attendanceStatus[student.id];
@@ -407,7 +465,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
               // Only count current absence if it's NOT a future date AND NOT cancelled
               const currentStreak = isPresent ? 0 : ((isFutureDate || isCancelled) ? 0 : pastStreak + 1);
               
-              // Only show alerts if not in future
+              // Only show alerts if not in future AND streak is 2 or more
               const showAlert = !isPresent && currentStreak >= 2 && !isFutureDate;
               
               const isContacted = contactedAbsentees.includes(student.id);
@@ -419,6 +477,8 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
                     {/* Name and WhatsApp Icon Row */}
                     <div className="flex items-center gap-2">
                        <span className={`font-bold text-lg truncate ${isPresent ? 'text-gray-800' : 'text-red-700'}`}>{student.name}</span>
+                       
+                       {/* WhatsApp Inquiry Button - Shows ONLY on 2nd day absent (streak >= 2) */}
                        {showAlert && (
                           <button 
                              onClick={(e) => sendAbsentAlert(student, currentStreak, e)} 
@@ -427,7 +487,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
                                  ? 'bg-green-100 border-green-200 text-green-600' 
                                  : 'bg-green-500 border-green-600 text-white hover:bg-green-600'
                              }`}
-                             title={isContacted ? "Message Sent" : "Send WhatsApp Notice"}
+                             title={isContacted ? "Inquiry Sent" : "Send Absence Inquiry"}
                           >
                              {isContacted ? <CheckCheck size={14} strokeWidth={3} /> : <MessageCircle size={14} fill="currentColor" className="text-white" />}
                           </button>
@@ -470,7 +530,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
       )}
 
       {/* SAVE BUTTON - Hide on invalid days or cancelled days */}
-      {isClassDay && !isCancelled && (
+      {isClassDay && !isCancelled && !isWaitingForFilter && (
         <div className="fixed bottom-20 left-4 right-4 z-30">
           <button onClick={handleSave} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-200 flex items-center justify-center gap-2 active:scale-95 transition-transform">
             <Save size={20} /> Save Attendance
