@@ -4,6 +4,9 @@ import { Student, ClassGroup, AttendanceRecord } from '../types';
 import { Save, Calendar as CalendarIcon, Check, X, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle, CalendarOff, CheckCheck, Coffee, ArrowRight, AlertTriangle, Search, Filter } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+// Helper type to satisfy strict date string requirements (YYYY-MM-DD)
+type DateString = `${string}-${string}-${string}`;
+
 interface AttendanceTrackerProps {
   students: Student[];
   classes: ClassGroup[];
@@ -211,7 +214,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
       onSaveAttendance({
         id: recordId,
         classId: classIdToSave,
-        date: date,
+        date: date as DateString,
         studentIdsPresent: [],
         contactedAbsentees: [], 
         status: 'active'
@@ -223,7 +226,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
       onSaveAttendance({
         id: recordId,
         classId: classIdToSave,
-        date: date,
+        date: date as DateString,
         studentIdsPresent: [],
         contactedAbsentees: [],
         status: 'cancelled'
@@ -247,7 +250,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     onSaveAttendance({
       id: recordId,
       classId: classIdToSave,
-      date: date,
+      date: date as DateString,
       studentIdsPresent: presentIds,
       contactedAbsentees: contactedAbsentees,
       status: 'active'
@@ -313,7 +316,7 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     onSaveAttendance({
       id: recordId,
       classId: classIdToSave,
-      date: date,
+      date: date as DateString,
       studentIdsPresent: presentIds,
       contactedAbsentees: updatedContactedList, // Use the updated list
       status: 'active'
