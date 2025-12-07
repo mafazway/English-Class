@@ -40,6 +40,7 @@ alter table students add column if not exists notes text;
 alter table students add column if not exists joined_date text;
 alter table students add column if not exists photo text;
 alter table students add column if not exists last_reminder_sent_at text;
+alter table students add column if not exists reminder_count numeric;
 alter table students add column if not exists last_inquiry_sent_date text;
 
 alter table students enable row level security;
@@ -97,6 +98,7 @@ create table if not exists fees (
 alter table fees alter column id type text;
 alter table fees alter column student_id type text;
 alter table fees add column if not exists paid_date text;
+alter table fees add column if not exists notes text;
 alter table fees add column if not exists receipt_sent boolean;
 alter table fees add column if not exists billing_month text;
 alter table fees add column if not exists next_due_date text;

@@ -1,6 +1,9 @@
+
+
+
 import React, { useState } from 'react';
 import { Student, FeeRecord } from '../types';
-import { ChevronDown, Check, X, DollarSign, MessageCircle, Trash2, ChevronLeft, ChevronRight, ArrowRight, Search, AlertCircle, FileText, Download, Calendar, Send, History, CheckCheck } from 'lucide-react';
+import { ChevronDown, Check, X, DollarSign, MessageCircle, Trash2, ChevronLeft, ChevronRight, ArrowRight, Search, AlertCircle, FileText, Download, Calendar, Send, History, CheckCheck, Edit2, Bell } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 interface FeeTrackerProps {
@@ -12,6 +15,18 @@ interface FeeTrackerProps {
   onUpdateStudent: (student: Student) => void;
 }
 
+// Robust ID Generator (Safe for all browsers/contexts including http)
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      // Fallback
+    }
+  }
+  return Date.now().toString(36) + Math.random().toString(36).substring(2, 10);
+};
+
 const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [], onAddFeeRecord, onUpdateFeeRecord, onDeleteFeeRecord, onUpdateStudent }) => {
   const [filter, setFilter] = useState<'Overdue' | 'Paid' | 'All'>('Overdue');
   const [selectedGrade, setSelectedGrade] = useState<string>('All');
@@ -20,11 +35,13 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
   // --- PAYMENT MODAL STATE ---
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   const [paymentStudent, setPaymentStudent] = useState<Student | null>(null);
+  const [editingFeeId, setEditingFeeId] = useState<string | null>(null); // Track ID if editing
+  
   const [amount, setAmount] = useState<string>("1000");
   const [paymentDate, setPaymentDate] = useState<string>(new Date().toISOString().split('T')[0]); // Default to Today
   
   // Billing Cycle State
-  const [billingOptions, setBillingOptions] = useState<{label: string, value: string}[]>([]);
+  const [billingOptions, setBillingOptions] = useState<{label: string, value: string, disabled: boolean}[]>([]);
   const [selectedBillingMonth, setSelectedBillingMonth] = useState<string>('');
 
   // History View State
@@ -39,7 +56,9 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
   // --- HELPERS ---
   const formatDate = (dateString?: string | Date) => {
     if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const d = new Date(dateString);
+    if (isNaN(d.getTime())) return '-';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
   const formatSLNumber = (num: string) => {
@@ -91,41 +110,124 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
   };
 
   // --- CORE LOGIC: NEXT DUE DATE CALCULATION ---
+  
+  // Helper to reliably determine the "Billing Month" a record pays for
+  const getEffectiveBillingDate = (r: FeeRecord): Date => {
+    // 1. Explicit Field (New records)
+    if (r.billingMonth) return new Date(r.billingMonth);
+    
+    // 2. Fallback: Try parsing notes (Backward compatibility)
+    // Matches "Billing Month: October 2025"
+    if (r.notes) {
+        const match = r.notes.match(/Billing Month: ([A-Za-z]+ \d{4})/);
+        if (match) {
+            const d = new Date(match[1]);
+            if (!isNaN(d.getTime())) return d;
+        }
+    }
+    
+    // 3. Last Resort: Use Paid Date (Only for very old/legacy records)
+    return new Date(r.date);
+  };
+
   const getStudentFeeStatus = (student: Student) => {
     const studentPayments = feeRecords
-      .filter(r => r.studentId === student.id)
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      .filter(r => r.studentId === student.id);
 
-    const lastPaidDateObj = studentPayments.length > 0 ? studentPayments[0].date : null;
-    const paymentCount = studentPayments.length;
+    // Analyze records to find the best anchor for "Next Due"
+    // We prefer records that have EXPLICIT billing months over ambiguous ones.
+    const analyzedRecords = studentPayments.map(r => {
+       let isExplicit = !!r.billingMonth;
+       let date = r.billingMonth ? new Date(r.billingMonth) : new Date(r.date);
+       
+       if (!isExplicit && r.notes) {
+          const match = r.notes.match(/Billing Month: ([A-Za-z]+ \d{4})/);
+          if (match) {
+             const d = new Date(match[1]);
+             if (!isNaN(d.getTime())) {
+                date = d;
+                isExplicit = true;
+             }
+          }
+       }
+       return { r, date, isExplicit };
+    });
+
+    const explicitRecords = analyzedRecords.filter(x => x.isExplicit && !isNaN(x.date.getTime()));
+    const validAnalyzedRecords = analyzedRecords.filter(x => !isNaN(x.date.getTime()));
     
-    // SAFE DATE PARSING
+    // Determine the Anchor Date (The latest covered month)
+    let anchorDate: Date | null = null;
+    let hasRecords = false;
+
+    if (explicitRecords.length > 0) {
+       // High Accuracy: Use latest EXPLICIT billing month (ignores random/duplicate entries without dates)
+       explicitRecords.sort((a, b) => b.date.getTime() - a.date.getTime());
+       anchorDate = explicitRecords[0].date;
+       hasRecords = true;
+    } else if (validAnalyzedRecords.length > 0) {
+       // Low Accuracy: Fallback to latest payment date
+       validAnalyzedRecords.sort((a, b) => b.date.getTime() - a.date.getTime());
+       anchorDate = validAnalyzedRecords[0].date;
+       hasRecords = true;
+    }
+
+    // SAFE DATE PARSING for Join Date
     let joinDate = new Date();
     if (student.joinedDate) {
        const [y, m, d] = student.joinedDate.split('-').map(Number);
-       joinDate = new Date(y, m - 1, d);
+       if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+          joinDate = new Date(y, m - 1, d);
+       }
     }
-    const joinedDay = joinDate.getDate();
-
-    // Logic: Next Due Date = Joined Date + Payment Count (in months)
-    const nextDueDate = new Date(joinDate);
-    nextDueDate.setMonth(joinDate.getMonth() + paymentCount);
-
-    // Handle Month Overflow
-    if (nextDueDate.getDate() !== joinedDay) {
-       nextDueDate.setDate(0); 
+    // Fallback if date parsing failed
+    if (isNaN(joinDate.getTime())) {
+       joinDate = new Date();
+       joinDate.setDate(1); 
     }
-    nextDueDate.setHours(0,0,0,0);
+    const billingDay = joinDate.getDate();
+
+    let nextDueDate = new Date(joinDate);
+
+    if (hasRecords && anchorDate) {
+        // Logic: Next Due = Anchor Month + 1 Month
+        const targetYear = anchorDate.getFullYear();
+        const targetMonth = anchorDate.getMonth() + 1;
+        
+        const lastDayOfTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+        const dayToSet = Math.min(billingDay, lastDayOfTargetMonth);
+        
+        nextDueDate = new Date(targetYear, targetMonth, dayToSet);
+        nextDueDate.setHours(0,0,0,0);
+    } else {
+        // No payments yet -> Due on Join Date
+        nextDueDate.setHours(0,0,0,0);
+    }
+
+    // Determine Last Paid Date (Actual Transaction Date for UI - purely informational)
+    // Filter out invalid dates before sorting
+    const transactions = [...studentPayments]
+        .filter(r => {
+            const d = new Date(r.date);
+            return !isNaN(d.getTime());
+        })
+        .sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        
+    const lastPaidDateObj = transactions.length > 0 ? transactions[0].date : null;
+    const lastReceiptSent = transactions.length > 0 ? transactions[0].receiptSent : false;
 
     // Check if Overdue
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    nextDueDate.setHours(0,0,0,0);
     
     const isOverdue = nextDueDate < today;
+    const paymentCount = studentPayments.length;
 
     return { 
       isOverdue, 
-      lastPaidDateObj, 
+      lastPaidDateObj,
+      lastReceiptSent, // Exposed for UI
       nextDueDate,
       paymentCount,
       joinDate
@@ -133,14 +235,19 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
   };
 
   // --- HANDLERS ---
-  const generateBillingOptions = (student: Student, currentNextDue: Date) => {
+  const generateBillingOptions = (student: Student, referenceDate: Date, recordToEditId: string | null = null) => {
      const options = [];
-     const start = new Date(currentNextDue);
-     start.setMonth(start.getMonth() - 3);
+     const start = new Date(referenceDate);
+     if (isNaN(start.getTime())) start.setTime(Date.now()); // Safety check
+
+     start.setMonth(start.getMonth() - 3); // Start offering 3 months back
 
      const originalDay = student.joinedDate ? parseInt(student.joinedDate.split('-')[2]) : 1;
      
-     for (let i = 0; i < 8; i++) {
+     // Get existing payments to detect duplicates
+     const existingPayments = feeRecords.filter(r => r.studentId === student.id);
+
+     for (let i = 0; i < 12; i++) { // Show 12 months range
         const d = new Date(start);
         d.setMonth(start.getMonth() + i);
         
@@ -152,40 +259,87 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
            }
         }
         
-        const isDueMonth = d.getMonth() === currentNextDue.getMonth() && d.getFullYear() === currentNextDue.getFullYear();
-        const label = `${d.toLocaleString('default', { month: 'long', year: 'numeric' })} ${isDueMonth ? '(Current Due)' : ''}`;
+        const isDueMonth = d.getMonth() === referenceDate.getMonth() && d.getFullYear() === referenceDate.getFullYear();
         
+        // Check if this month is already paid
+        const isAlreadyPaid = existingPayments.some(r => {
+            if (recordToEditId && r.id === recordToEditId) return false; // Don't count self as duplicate when editing
+            const rDate = getEffectiveBillingDate(r);
+            return !isNaN(rDate.getTime()) && rDate.getMonth() === d.getMonth() && rDate.getFullYear() === d.getFullYear();
+        });
+
+        const monthName = d.toLocaleString('default', { month: 'long', year: 'numeric' });
+        let label = monthName;
+        
+        if (isAlreadyPaid) label += " (ALREADY PAID)";
+        else if (isDueMonth) label += " (Current Due)";
+
         options.push({
            label: label,
-           value: d.toISOString()
+           value: d.toISOString(),
+           disabled: isAlreadyPaid
         });
      }
      return options;
   };
 
-  const resetForm = (student?: Student) => {
-    setAmount("1000"); 
-    setPaymentDate(new Date().toISOString().split('T')[0]);
-    setIsSkipped(false);
-    setSkipReason("");
-    
-    if (student) {
-        const { nextDueDate } = getStudentFeeStatus(student);
-        const options = generateBillingOptions(student, nextDueDate);
-        setBillingOptions(options);
-        
-        const match = options.find(o => {
-            const optDate = new Date(o.value);
-            return optDate.getMonth() === nextDueDate.getMonth() && optDate.getFullYear() === nextDueDate.getFullYear();
-        });
-        
-        setSelectedBillingMonth(match ? match.value : options[3].value);
-    }
-  };
-
-  const openPaymentModal = (student: Student) => {
+  const openPaymentModal = (student: Student, recordToEdit?: FeeRecord) => {
     setPaymentStudent(student);
-    resetForm(student);
+    
+    // 1. Generate Options based on Current Status
+    const { nextDueDate } = getStudentFeeStatus(student);
+    // If editing, use the record's billing date as reference to ensure the option exists
+    const refDate = recordToEdit && recordToEdit.billingMonth ? new Date(recordToEdit.billingMonth) : nextDueDate;
+    
+    const options = generateBillingOptions(student, refDate, recordToEdit?.id);
+    setBillingOptions(options);
+
+    if (recordToEdit) {
+      // --- EDIT MODE ---
+      setEditingFeeId(recordToEdit.id);
+      
+      const isSkippedRec = recordToEdit.amount === 0;
+      setIsSkipped(isSkippedRec);
+      setAmount(recordToEdit.amount.toString());
+      setPaymentDate(new Date(recordToEdit.date).toISOString().split('T')[0]);
+      
+      const existingOption = options.find(o => {
+         const optDate = new Date(o.value);
+         const recDate = new Date(recordToEdit.billingMonth || '');
+         return !isNaN(optDate.getTime()) && !isNaN(recDate.getTime()) && optDate.getMonth() === recDate.getMonth() && optDate.getFullYear() === recDate.getFullYear();
+      });
+      setSelectedBillingMonth(existingOption ? existingOption.value : (recordToEdit.billingMonth || ''));
+
+      if (isSkippedRec && recordToEdit.notes) {
+        const match = recordToEdit.notes.match(/\(Skipped: (.*)\)/);
+        setSkipReason(match ? match[1] : "");
+      } else {
+        setSkipReason("");
+      }
+
+    } else {
+      // --- ADD NEW MODE ---
+      setEditingFeeId(null);
+      setAmount("1000"); 
+      setPaymentDate(new Date().toISOString().split('T')[0]);
+      setIsSkipped(false);
+      setSkipReason("");
+      
+      // Auto-select the month matching nextDueDate (or first available unpaid)
+      const match = options.find(o => {
+          const optDate = new Date(o.value);
+          return optDate.getMonth() === nextDueDate.getMonth() && optDate.getFullYear() === nextDueDate.getFullYear();
+      });
+      
+      if (match && !match.disabled) {
+          setSelectedBillingMonth(match.value);
+      } else {
+          // Find first non-disabled option
+          const firstAvailable = options.find(o => !o.disabled);
+          setSelectedBillingMonth(firstAvailable ? firstAvailable.value : options[0].value);
+      }
+    }
+
     setIsPaymentModalOpen(true);
   };
 
@@ -205,22 +359,35 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
   const nextStudent = currentIndex !== -1 && currentIndex < filteredStudents.length - 1 ? filteredStudents[currentIndex + 1] : null;
 
   const switchToStudent = (student: Student) => {
-    setPaymentStudent(student);
-    resetForm(student);
+    openPaymentModal(student);
   };
 
   const submitPayment = (closeAfterSave: boolean = true, wasReceiptSent: boolean = false) => {
     if (!paymentStudent || (!amount && !isSkipped) || !paymentDate || !selectedBillingMonth) return;
 
-    const finalAmount = isSkipped ? 0 : parseFloat(amount);
-    
     const billingDateObj = new Date(selectedBillingMonth);
     const billingMonthStr = billingDateObj.toLocaleString('default', { month: 'short', year: 'numeric' });
+
+    // --- DUPLICATE CHECK ---
+    const isDuplicate = feeRecords.some(r => {
+        if (r.studentId !== paymentStudent.id) return false;
+        if (editingFeeId && r.id === editingFeeId) return false; // Ignore self if editing
+
+        const rDate = getEffectiveBillingDate(r);
+        return rDate.getMonth() === billingDateObj.getMonth() && 
+               rDate.getFullYear() === billingDateObj.getFullYear();
+    });
+
+    if (isDuplicate) {
+        toast.error(`Fee for ${billingMonthStr} is already paid!`);
+        return;
+    }
+
+    const finalAmount = isSkipped ? 0 : parseFloat(amount);
     
     let noteText = `Billing Month: ${billingMonthStr}`;
     if (isSkipped) noteText += ` (Skipped: ${skipReason || 'No reason'})`;
     
-    // Calculate accurate Next Due Date (billing month + 1 month)
     const nextDueDateObj = new Date(billingDateObj);
     nextDueDateObj.setMonth(nextDueDateObj.getMonth() + 1);
     if (paymentStudent.joinedDate) {
@@ -231,23 +398,42 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
     }
     const nextDueStr = nextDueDateObj.toISOString().split('T')[0];
 
-    onAddFeeRecord({
-      id: crypto.randomUUID(),
+    // FIX: Preserve existing receiptSent status during edits
+    let finalReceiptSent = wasReceiptSent;
+    if (editingFeeId && !finalReceiptSent) {
+       // Find existing record to see if it was already sent
+       const existingRecord = feeRecords.find(r => r.id === editingFeeId);
+       if (existingRecord?.receiptSent) {
+          finalReceiptSent = true;
+       }
+    }
+
+    const recordData = {
+      id: editingFeeId || generateId(), // Use robust ID gen
       studentId: paymentStudent.id,
       amount: finalAmount,
       date: new Date(paymentDate).toISOString(),
       notes: noteText,
-      receiptSent: wasReceiptSent,
+      receiptSent: finalReceiptSent, // Use calculated status
       billingMonth: selectedBillingMonth,
       nextDueDate: nextDueStr
-    });
-    
-    const msg = isSkipped ? `Waived ${billingMonthStr}` : `Paid for ${billingMonthStr}`;
-    toast.success(msg);
+    };
+
+    if (editingFeeId) {
+      onUpdateFeeRecord(recordData);
+      toast.success("Payment Updated");
+    } else {
+      onAddFeeRecord(recordData);
+      // RESET REMINDER COUNT ON PAYMENT
+      onUpdateStudent({ ...paymentStudent, reminderCount: 0 });
+      const msg = isSkipped ? `Waived ${billingMonthStr}` : `Paid for ${billingMonthStr}`;
+      toast.success(msg);
+    }
 
     if (closeAfterSave) {
       setIsPaymentModalOpen(false);
       setPaymentStudent(null);
+      setEditingFeeId(null);
     }
   };
 
@@ -281,11 +467,9 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
     const number = student.whatsappNumber || student.mobileNumber;
     if (!number) { toast.error("No number found"); return; }
 
-    // --- SMART FALLBACK LOGIC ---
     let billingMonthDisplay = "Unknown Month";
     let nextDueText = "Check App";
     
-    // 1. Try to get Billing Month
     if (record.billingMonth) {
         const d = new Date(record.billingMonth);
         if (!isNaN(d.getTime())) {
@@ -295,19 +479,16 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
         const match = record.notes.match(/Billing Month: ([^(]+)/);
         if (match) billingMonthDisplay = match[1].trim();
     } else if (record.date) {
-        // Fallback: Use Payment Date as Billing Month
         const d = new Date(record.date);
         billingMonthDisplay = d.toLocaleString('default', { month: 'long', year: 'numeric' });
     }
 
-    // 2. Try to get Next Due Date
     if (record.nextDueDate) {
         const d = new Date(record.nextDueDate);
         if (!isNaN(d.getTime())) {
            nextDueText = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
         }
     } else {
-        // Fallback: Add 1 month to Billing/Payment date
         const baseDate = record.billingMonth ? new Date(record.billingMonth) : new Date(record.date);
         baseDate.setMonth(baseDate.getMonth() + 1);
         if (student.joinedDate) {
@@ -352,7 +533,14 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
 
     const url = `https://wa.me/${formatSLNumber(number)}?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
-    onUpdateStudent({ ...student, lastReminderSentAt: new Date().toISOString() });
+    
+    // Increment Reminder Count & Update Timestamp
+    onUpdateStudent({ 
+       ...student, 
+       lastReminderSentAt: new Date().toISOString(),
+       reminderCount: (student.reminderCount || 0) + 1 
+    });
+    toast.success("Reminder Logged!");
   };
 
   const handleDownloadPDF = async () => {
@@ -376,305 +564,374 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
         return [
           student.name,
           student.grade,
-          student.mobileNumber || '-',
+          student.mobileNumber,
           getBillingDayText(student.joinedDate),
-          lastPaidDateObj ? formatDate(lastPaidDateObj) : 'Never',
+          formatDate(lastPaidDateObj),
           formatDate(nextDueDate),
           isOverdue ? 'OVERDUE' : 'PAID'
         ];
       });
 
       autoTable(doc, {
+        startY: 40,
         head: [tableColumn],
         body: tableRows,
-        startY: 40,
-        styles: { fontSize: 9 },
-        headStyles: { fillColor: [79, 70, 229] }, 
-        alternateRowStyles: { fillColor: [243, 244, 246] }
       });
 
-      doc.save(`Fee_Report_${filter}_${new Date().toISOString().split('T')[0]}.pdf`);
-      toast.success("Report Downloaded", { id: toastId });
-    } catch (error) {
-      console.error("PDF Error:", error);
-      toast.error("Failed to generate PDF", { id: toastId });
+      doc.save(`Fee_Report_${new Date().toISOString().split('T')[0]}.pdf`);
+      toast.success("PDF Downloaded", { id: toastId });
+    } catch (e) {
+      console.error(e);
+      toast.error("PDF generation failed", { id: toastId });
     }
   };
 
+  const toggleHistory = (studentId: string) => {
+    setExpandedStudentId(expandedStudentId === studentId ? null : studentId);
+  };
+
   return (
-    <div className="p-4 pb-24 space-y-5 bg-gray-50 min-h-full">
-      {/* HEADER: TITLE & SEARCH */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-        {/* Top Bar */}
-        <div className="p-5 pb-2 flex justify-between items-center">
-          <h2 className="text-2xl font-extrabold text-slate-800">Fee Manager</h2>
+    <div className="pb-24 space-y-4">
+      {/* HEADER & FILTERS */}
+      <div className="bg-white p-4 rounded-b-3xl shadow-sm border-b border-gray-100 sticky top-0 z-20">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-2xl font-bold text-gray-800">Fee Manager</h2>
           <div className="flex items-center gap-2">
-            <button onClick={handleDownloadPDF} className="p-2 bg-indigo-50 text-indigo-600 rounded-full hover:bg-indigo-100 transition-colors border border-indigo-100">
-              <Download size={18} />
+            <button onClick={handleDownloadPDF} className="p-2 bg-gray-50 text-gray-600 rounded-xl hover:bg-gray-100">
+              <Download size={20} />
             </button>
-            <span className="text-xs font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full border border-slate-200">
-              {filteredStudents.length} Students
-            </span>
+            <div className="bg-gray-100 px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600">
+               {filteredStudents.length} Students
+            </div>
           </div>
         </div>
+        
+        <div className="relative mb-3">
+           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+           <input 
+             type="text" 
+             placeholder="Search by name..." 
+             value={searchTerm}
+             onChange={(e) => setSearchTerm(e.target.value)}
+             className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-700 placeholder-gray-400 transition-colors"
+           />
+        </div>
 
-        {/* Search Bar & Filters */}
-        <div className="px-5 pb-5 pt-3">
-           <div className="relative mb-3">
-             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-             <input 
-               type="text" 
-               placeholder="Search student name..." 
-               value={searchTerm}
-               onChange={e => setSearchTerm(e.target.value)}
-               className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-700 placeholder-gray-400 transition-colors font-medium"
-             />
+        <div className="flex gap-2">
+           <div className="flex bg-gray-50 p-1 rounded-xl flex-1">
+              {(['Overdue', 'Paid', 'All'] as const).map(f => (
+                <button 
+                  key={f} 
+                  onClick={() => setFilter(f)} 
+                  className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${filter === f ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}`}
+                >
+                  {f}
+                </button>
+              ))}
            </div>
-
-           <div className="flex flex-col sm:flex-row gap-3">
-             <div className="flex bg-slate-100 p-1 rounded-xl flex-1">
-               {['Overdue', 'Paid', 'All'].map((tab) => (
-                 <button key={tab} onClick={() => setFilter(tab as any)} className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${filter === tab ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-black/5' : 'text-slate-500 hover:text-slate-700'}`}>{tab}</button>
-               ))}
-             </div>
-             <div className="relative min-w-[130px] bg-white border border-slate-300 rounded-xl hover:border-indigo-400 transition-colors">
-               <select value={selectedGrade} onChange={(e) => setSelectedGrade(e.target.value)} className="block w-full px-3 py-2.5 text-sm font-bold text-slate-700 bg-transparent outline-none cursor-pointer appearance-none">
-                 {uniqueGrades.map((g) => <option key={g} value={g}>{g === 'All' ? 'All Grades' : `Grade ${g}`}</option>)}
-               </select>
-               <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none text-slate-500"><ChevronDown size={14} /></div>
-             </div>
+           <div className="w-1/3 min-w-[110px]">
+             <select 
+                value={selectedGrade}
+                onChange={(e) => setSelectedGrade(e.target.value)}
+                className="w-full h-full px-3 py-2 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-gray-700 font-bold text-xs appearance-none"
+             >
+               {uniqueGrades.map(g => <option key={g} value={g}>{g === 'All' ? 'All Grades' : `Grade ${g}`}</option>)}
+             </select>
            </div>
         </div>
       </div>
 
-      {/* STUDENT CARDS */}
-      <div className="grid grid-cols-1 gap-4">
+      {/* STUDENT LIST */}
+      <div className="px-1 space-y-3">
         {filteredStudents.map(student => {
-          const { isOverdue, lastPaidDateObj, nextDueDate, paymentCount } = getStudentFeeStatus(student);
-          const studentHistory = feeRecords
-             .filter(r => r.studentId === student.id)
-             .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+          const { isOverdue, lastPaidDateObj, nextDueDate, paymentCount, joinDate, lastReceiptSent } = getStudentFeeStatus(student);
+          const history = feeRecords.filter(r => r.studentId === student.id).sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime());
           
-          const lastPaymentId = studentHistory[0]?.id;
-          const isHistoryExpanded = expandedStudentId === student.id;
-          
-          const sentRecently = wasSentRecently(student.lastReminderSentAt);
-          const reminderText = getRelativeTime(student.lastReminderSentAt);
-
           return (
-            <div key={student.id} className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
-              <div className="p-4 flex justify-between items-start border-b border-gray-50">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">{student.name}</h3>
-                  <div className="mt-1 flex items-center gap-2">
-                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-600 uppercase tracking-wide border border-slate-200">Grade {student.grade}</span>
-                     <span className="text-[10px] text-gray-400 font-medium">({paymentCount} payments)</span>
-                  </div>
-                </div>
-                {!isOverdue ? (
-                  <span className="flex items-center gap-1.5 bg-green-50 text-green-700 px-3 py-1.5 rounded-lg text-xs font-extrabold border border-green-200 shadow-sm"><Check size={14} strokeWidth={3} /> PAID</span>
-                ) : (
-                  <span className="flex items-center gap-1.5 bg-red-50 text-red-600 px-3 py-1.5 rounded-lg text-xs font-extrabold border border-red-200 shadow-sm"><X size={14} strokeWidth={3} /> OVERDUE</span>
-                )}
-              </div>
-
-              <div className="px-4 py-4">
-                <div className="grid grid-cols-3 gap-0 bg-slate-50 rounded-xl border border-slate-200 divide-x divide-slate-200">
-                  <div className="p-3 text-center">
-                    <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Bill Date</span>
-                    <span className="block text-sm font-bold text-slate-700">{getBillingDayText(student.joinedDate)}</span>
-                  </div>
-                  <div className="p-3 text-center"><span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Last Paid</span><span className={`block text-sm font-bold ${lastPaidDateObj ? 'text-slate-700' : 'text-orange-500'}`}>{lastPaidDateObj ? formatDate(lastPaidDateObj) : 'Never'}</span></div>
-                  <div className="p-3 text-center"><span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Next Due</span><span className={`block text-sm font-extrabold ${!isOverdue ? 'text-green-600' : 'text-red-600'}`}>{formatDate(nextDueDate)}</span></div>
-                </div>
-              </div>
-
-              <div className="px-4 pb-4 flex gap-2">
-                {isOverdue ? (
-                  <>
-                    <button onClick={() => openPaymentModal(student)} className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl shadow-md active:scale-[0.98] transition-all flex items-center justify-center gap-2">
-                      <DollarSign size={18} strokeWidth={2.5} /> Record Payment
-                    </button>
-                    <div className="flex flex-col items-center">
-                       <button 
-                         onClick={() => handleSendReminder(student, lastPaidDateObj, nextDueDate)} 
-                         className={`p-3 rounded-xl shadow-sm border active:scale-[0.95] transition-all relative ${sentRecently ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-green-100 text-green-700 border-green-200'}`} 
-                         title="Send WhatsApp Reminder"
-                       >
-                         {sentRecently && <span className="absolute -top-1 -right-1 flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-orange-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-orange-500"></span></span>}
-                         <MessageCircle size={24} strokeWidth={2.5} />
-                       </button>
-                       {reminderText && <span className="text-[9px] text-gray-400 font-medium mt-1">{reminderText}</span>}
-                    </div>
-                  </>
-                ) : (
-                  <button onClick={() => { if(lastPaymentId && window.confirm("Undo the last payment?")) onDeleteFeeRecord(lastPaymentId); }} className="w-full bg-red-50 hover:bg-red-100 text-red-600 font-bold py-3 rounded-xl border border-red-100 active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm">
-                    <Trash2 size={16} /> Undo Last Payment
-                  </button>
-                )}
-                
-                {/* History Toggle Button */}
-                <button 
-                  onClick={() => setExpandedStudentId(isHistoryExpanded ? null : student.id)} 
-                  className={`p-3 rounded-xl shadow-sm border transition-all active:scale-[0.95] h-[52px] ${isHistoryExpanded ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
-                  title="View History"
-                >
-                   <History size={24} strokeWidth={2} />
-                </button>
-              </div>
-
-              {/* EXPANDED HISTORY LIST */}
-              {isHistoryExpanded && (
-                <div className="border-t border-slate-100 bg-slate-50/50 p-4 space-y-3 animate-fade-in">
-                   <div className="flex items-center justify-between">
-                     <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2"><History size={12}/> Payment History</h4>
-                     <span className="text-[10px] text-slate-400">{studentHistory.length} records</span>
+            <div key={student.id} className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+               <div className="p-4">
+                 <div className="flex justify-between items-start mb-4">
+                   <div>
+                     <h3 className="text-lg font-bold text-gray-800">{student.name}</h3>
+                     <div className="flex items-center gap-2 mt-1">
+                        <span className="text-[10px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-bold uppercase">Grade {student.grade}</span>
+                        <span className="text-[10px] text-gray-400">({paymentCount} payments)</span>
+                     </div>
                    </div>
-                   
-                   {studentHistory.length === 0 ? (
-                      <div className="text-center py-4 text-slate-400 text-sm italic">No history found.</div>
-                   ) : (
-                      <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                        {studentHistory.map(record => (
-                          <div key={record.id} className="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
-                             <div>
-                                <p className="text-xs font-bold text-slate-700">{formatDate(record.date)}</p>
-                                <p className="text-[10px] text-slate-500 font-medium">{record.notes || 'Payment Received'}</p>
-                             </div>
-                             <div className="flex items-center gap-3">
-                                <span className="text-sm font-bold text-slate-800">Rs.{record.amount}</span>
-                                
-                                <div className="flex items-center gap-1">
-                                  {record.receiptSent && (
-                                     <CheckCheck size={16} className="text-green-500" />
-                                  )}
-                                  <button 
-                                    onClick={() => handleSendPastReceipt(student, record)}
-                                    className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors shadow-sm ${record.receiptSent ? 'bg-green-50 text-green-600 border border-green-100' : 'bg-gray-100 text-gray-500 hover:bg-green-100 hover:text-green-600'}`}
-                                    title={record.receiptSent ? "Receipt Sent (Send again)" : "Send Receipt"}
-                                  >
-                                     <MessageCircle size={16} />
-                                  </button>
-                                </div>
+                   <div className={`px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 ${isOverdue ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-600 border-green-100'}`}>
+                      {isOverdue ? <><X size={10} strokeWidth={3} /> OVERDUE</> : <><Check size={10} strokeWidth={3} /> PAID</>}
+                   </div>
+                 </div>
 
-                             </div>
+                 <div className="grid grid-cols-3 gap-2 mb-4">
+                    <div className="bg-gray-50 p-2 rounded-xl border border-gray-100 text-center">
+                       <p className="text-[9px] font-bold text-gray-400 uppercase mb-1">Bill Date</p>
+                       <p className="text-xs font-bold text-gray-700">{getBillingDayText(student.joinedDate)}</p>
+                    </div>
+                    <div className="bg-gray-50 p-2 rounded-xl border border-gray-100 text-center relative">
+                       <p className="text-[9px] font-bold text-gray-400 uppercase mb-1">Last Paid</p>
+                       <p className={`text-xs font-bold ${lastPaidDateObj ? 'text-gray-700' : 'text-orange-500'}`}>{formatDate(lastPaidDateObj) || 'Never'}</p>
+                       {/* Receipt Sent Indicator */}
+                       {lastReceiptSent && (
+                          <div className="absolute top-1 right-1 text-green-600 bg-green-100 rounded-full p-0.5" title="Receipt Sent">
+                             <CheckCheck size={10} />
                           </div>
-                        ))}
-                      </div>
-                   )}
-                </div>
-              )}
+                       )}
+                    </div>
+                    <div className={`bg-gray-50 p-2 rounded-xl border text-center ${isOverdue ? 'border-red-100 bg-red-50' : 'border-gray-100'}`}>
+                       <p className={`text-[9px] font-bold uppercase mb-1 ${isOverdue ? 'text-red-400' : 'text-gray-400'}`}>Next Due</p>
+                       <p className={`text-xs font-bold ${isOverdue ? 'text-red-600' : 'text-green-600'}`}>{formatDate(nextDueDate)}</p>
+                    </div>
+                 </div>
+
+                 <div className="flex gap-2">
+                    <button 
+                      onClick={() => openPaymentModal(student)}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-bold text-sm shadow-md shadow-indigo-200 flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                    >
+                       <DollarSign size={16} /> Record Payment
+                    </button>
+                    
+                    {isOverdue && (
+                      <button 
+                        onClick={() => handleSendReminder(student, lastPaidDateObj, nextDueDate)}
+                        className="p-3 bg-green-50 text-green-600 rounded-xl border border-green-100 hover:bg-green-100 flex items-center justify-center active:scale-95 transition-transform relative"
+                        title="Send WhatsApp Reminder"
+                      >
+                         <MessageCircle size={20} />
+                         
+                         {/* Visual Counter for Reminders Sent */}
+                         {student.reminderCount && student.reminderCount > 0 ? (
+                           <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-sm border border-white">
+                             {student.reminderCount}
+                           </span>
+                         ) : null}
+
+                         {/* Recent Pulse Animation */}
+                         {student.lastReminderSentAt && wasSentRecently(student.lastReminderSentAt) && !student.reminderCount && (
+                            <span className="absolute top-1 right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                         )}
+                      </button>
+                    )}
+                    
+                    <button 
+                      onClick={() => toggleHistory(student.id)}
+                      className={`p-3 rounded-xl border flex items-center justify-center active:scale-95 transition-transform ${expandedStudentId === student.id ? 'bg-gray-100 border-gray-300 text-gray-800' : 'bg-white border-gray-200 text-gray-500'}`}
+                    >
+                       <History size={20} />
+                    </button>
+                 </div>
+               </div>
+
+               {/* PAYMENT HISTORY DROPDOWN */}
+               {expandedStudentId === student.id && (
+                  <div className="bg-gray-50 border-t border-gray-100 p-4 animate-slide-up">
+                     <div className="flex justify-between items-center mb-3">
+                        <h4 className="text-xs font-bold text-gray-500 uppercase flex items-center gap-1">
+                           <History size={12} /> Payment History
+                        </h4>
+                        <span className="text-[10px] text-gray-400">{history.length} records</span>
+                     </div>
+                     <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                        {history.length === 0 ? (
+                           <p className="text-xs text-center text-gray-400 py-2">No payment history found.</p>
+                        ) : (
+                           history.map(record => (
+                              <div key={record.id} className="bg-white p-3 rounded-xl border border-gray-200 flex justify-between items-center group">
+                                 <div>
+                                    <p className="text-xs font-bold text-gray-800">{formatDate(record.date)}</p>
+                                    <p className="text-[10px] text-gray-500">{record.notes || 'Payment Received'}</p>
+                                 </div>
+                                 <div className="flex items-center gap-2">
+                                    <span className={`text-sm font-bold ${record.amount === 0 ? 'text-gray-400 line-through' : 'text-gray-800'}`}>Rs.{record.amount}</span>
+                                    
+                                    {/* Action Buttons */}
+                                    <div className="flex gap-1">
+                                       <button 
+                                          onClick={() => handleSendPastReceipt(student, record)}
+                                          className={`p-1.5 rounded-lg ${record.receiptSent ? 'text-green-600 bg-green-50' : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
+                                          title="Resend Receipt"
+                                       >
+                                          {record.receiptSent ? <CheckCheck size={14} /> : <MessageCircle size={14} />}
+                                       </button>
+                                       <button 
+                                          onClick={() => openPaymentModal(student, record)}
+                                          className="p-1.5 rounded-lg text-gray-400 hover:text-indigo-600 hover:bg-indigo-50"
+                                          title="Edit Record"
+                                       >
+                                          <Edit2 size={14} />
+                                       </button>
+                                       <button 
+                                          onClick={() => {
+                                             if(confirm('Are you sure you want to delete this payment?')) {
+                                                onDeleteFeeRecord(record.id);
+                                                toast.success('Payment deleted');
+                                             }
+                                          }}
+                                          className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50"
+                                          title="Delete Record"
+                                       >
+                                          <Trash2 size={14} />
+                                       </button>
+                                    </div>
+                                 </div>
+                              </div>
+                           ))
+                        )}
+                     </div>
+                  </div>
+               )}
             </div>
           );
         })}
+        {filteredStudents.length === 0 && (
+           <div className="text-center py-10 text-gray-400">
+              <p>No students match the selected filters.</p>
+           </div>
+        )}
       </div>
 
-      {/* --- PAYMENT POPUP MODAL --- */}
+      {/* PAYMENT MODAL */}
       {isPaymentModalOpen && paymentStudent && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 relative">
-            
-            {/* Navigation */}
-            {prevStudent && (
-               <button onClick={() => switchToStudent(prevStudent)} className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-gray-200/50 backdrop-blur-md text-white shadow-lg hover:bg-white/40 border border-white/20"><ChevronLeft size={24} /></button>
-            )}
-            {nextStudent && (
-               <button onClick={() => switchToStudent(nextStudent)} className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-gray-200/50 backdrop-blur-md text-white shadow-lg hover:bg-white/40 border border-white/20"><ChevronRight size={24} /></button>
-            )}
-
-            <div className={`${isSkipped ? 'bg-amber-500' : 'bg-indigo-600'} p-6 text-white text-center transition-colors duration-300`}>
-              <h3 className="text-xl font-bold flex items-center justify-center gap-2">
-                 {isSkipped ? <AlertCircle size={22}/> : null}
-                 {isSkipped ? 'Waive Month' : 'Record Payment'}
-              </h3>
-              <p className={`${isSkipped ? 'text-amber-100' : 'text-indigo-200'} text-sm mt-1`}>{paymentStudent.name}</p>
-            </div>
-            
-            <div className="p-6 space-y-4">
+        <div className="fixed inset-0 bg-black/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in backdrop-blur-sm">
+           <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-6 animate-slide-up sm:animate-scale-in relative shadow-2xl">
               
-              {/* Skip Option */}
-              <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors">
-                 <div className={`w-5 h-5 rounded border flex items-center justify-center ${isSkipped ? 'bg-amber-500 border-amber-500' : 'border-gray-400 bg-white'}`}>
-                    {isSkipped && <Check size={14} className="text-white" />}
-                 </div>
-                 <input type="checkbox" checked={isSkipped} onChange={(e) => { setIsSkipped(e.target.checked); if(e.target.checked) setAmount("0"); else setAmount("1000"); }} className="hidden" />
-                 <span className="text-sm font-bold text-gray-700">Mark as Skipped / Leave</span>
-              </label>
-
-              {/* Amount or Reason */}
-              {isSkipped ? (
-                 <div className="animate-fade-in">
-                    <label className="block text-xs font-bold text-amber-600 uppercase mb-2">Reason for Skipping</label>
-                    <div className="relative">
-                       <FileText className="absolute left-4 top-3.5 text-gray-400" size={18}/>
-                       <input type="text" value={skipReason} onChange={(e) => setSkipReason(e.target.value)} placeholder="e.g. Medical Leave" className="w-full pl-12 pr-4 py-3 bg-amber-50 border border-amber-200 rounded-xl font-medium text-gray-800 outline-none focus:ring-2 focus:ring-amber-500" />
-                    </div>
-                 </div>
-              ) : (
-                 <div className="animate-fade-in">
-                    <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Amount (LKR)</label>
-                    <div className="relative">
-                       <span className="absolute left-4 top-3.5 text-gray-400 font-bold">Rs.</span>
-                       <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full pl-12 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-800 text-lg outline-none focus:ring-2 focus:ring-indigo-500" />
-                    </div>
-                 </div>
+              {/* Navigation Arrows (Only in Add Mode) */}
+              {!editingFeeId && (
+                 <>
+                   {prevStudent && (
+                     <button 
+                        onClick={() => switchToStudent(prevStudent)}
+                        className="absolute -left-12 top-1/2 -translate-y-1/2 p-2 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/40 hidden sm:block"
+                     >
+                        <ChevronLeft size={24} />
+                     </button>
+                   )}
+                   {nextStudent && (
+                     <button 
+                        onClick={() => switchToStudent(nextStudent)}
+                        className="absolute -right-12 top-1/2 -translate-y-1/2 p-2 bg-white/20 backdrop-blur-md rounded-full text-white hover:bg-white/40 hidden sm:block"
+                     >
+                        <ChevronRight size={24} />
+                     </button>
+                   )}
+                 </>
               )}
-              
-              {/* Billing Month Selection */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Paying For Month</label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-3.5 text-indigo-500" size={18} />
-                  <select 
-                    value={selectedBillingMonth}
-                    onChange={(e) => setSelectedBillingMonth(e.target.value)}
-                    className="w-full pl-10 pr-4 py-3 bg-indigo-50 border border-indigo-100 rounded-xl font-bold text-indigo-900 outline-none focus:ring-2 focus:ring-indigo-500 appearance-none"
-                  >
-                    {billingOptions.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-3 top-3.5 text-indigo-400 pointer-events-none" size={18} />
-                </div>
-                <p className="text-[10px] text-gray-400 mt-1 pl-1">This will be the cycle marked as cleared.</p>
-              </div>
 
-              {/* Payment Date */}
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Payment Received Date</label>
-                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} className="w-full p-3 bg-gray-50 border border-gray-200 rounded-xl font-bold text-gray-800 outline-none focus:ring-2 focus:ring-indigo-500" />
+              <div className="text-center mb-6 bg-indigo-600 -mx-6 -mt-6 p-6 rounded-t-2xl">
+                 <h3 className="text-xl font-bold text-white mb-1">
+                   {editingFeeId ? 'Edit Payment' : 'Record Payment'}
+                 </h3>
+                 <p className="text-indigo-200 text-sm font-medium">{paymentStudent.name}</p>
               </div>
               
-              <div className="pt-2 grid grid-cols-2 gap-3">
-                <button onClick={() => setIsPaymentModalOpen(false)} className="col-span-1 py-3 bg-gray-100 text-gray-500 font-bold hover:bg-gray-200 rounded-xl transition-colors">Cancel</button>
-                <button 
-                  onClick={() => submitPayment(true)} 
-                  className={`col-span-1 py-3 text-white font-bold rounded-xl shadow-lg transition-transform active:scale-95 ${isSkipped ? 'bg-amber-500 hover:bg-amber-600 shadow-amber-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
-                >
-                  {isSkipped ? 'Confirm Skip' : 'Save'}
-                </button>
-                
-                {/* NEW WHATSAPP BUTTON */}
-                {!isSkipped && (
-                   <button 
-                      onClick={handleSaveAndWhatsApp}
-                      className="col-span-2 py-3 bg-green-500 text-white font-bold rounded-xl shadow-lg shadow-green-200 hover:bg-green-600 transition-colors flex items-center justify-center gap-2 active:scale-95"
-                   >
-                      <Send size={18} /> Save & Send WhatsApp
-                   </button>
-                )}
+              <div className="space-y-4">
+                 
+                 {/* Skipped Toggle */}
+                 <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                    <input 
+                      type="checkbox" 
+                      id="skipped" 
+                      checked={isSkipped} 
+                      onChange={(e) => setIsSkipped(e.target.checked)}
+                      className="w-5 h-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300 bg-white"
+                    />
+                    <label htmlFor="skipped" className="text-sm font-bold text-gray-700 flex-1">Mark as Skipped / Leave</label>
+                 </div>
 
-                {nextStudent && (
-                  <button onClick={handleSaveAndNext} className="col-span-2 py-3 bg-indigo-50 text-indigo-700 font-bold rounded-xl border border-indigo-100 hover:bg-indigo-100 transition-colors flex items-center justify-center gap-2 active:scale-[0.98]">
-                    {isSkipped ? 'Confirm & Next' : 'Save & Next'} <ArrowRight size={16} />
-                  </button>
-                )}
+                 {/* Amount */}
+                 {!isSkipped && (
+                    <div>
+                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Amount (LKR)</label>
+                       <div className="relative">
+                          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">Rs.</span>
+                          <input 
+                            type="number" 
+                            value={amount} 
+                            onChange={(e) => setAmount(e.target.value)} 
+                            className="w-full pl-12 pr-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-lg font-bold text-gray-800"
+                          />
+                       </div>
+                    </div>
+                 )}
+
+                 {/* Skip Reason */}
+                 {isSkipped && (
+                    <div>
+                       <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Reason for Skipping</label>
+                       <input 
+                         type="text" 
+                         value={skipReason} 
+                         onChange={(e) => setSkipReason(e.target.value)} 
+                         placeholder="e.g. Medical Leave, Scholarship"
+                         className="w-full px-4 py-3 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                       />
+                    </div>
+                 )}
+
+                 {/* Month Selector */}
+                 <div>
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Paying For Month</label>
+                    <div className="relative">
+                       <select 
+                          value={selectedBillingMonth}
+                          onChange={(e) => setSelectedBillingMonth(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-bold text-indigo-900 appearance-none"
+                       >
+                          {billingOptions.map(opt => (
+                             <option key={opt.value} value={opt.value} disabled={opt.disabled} className={opt.disabled ? 'text-gray-400' : 'text-gray-900'}>
+                                {opt.label}
+                             </option>
+                          ))}
+                       </select>
+                       <div className="absolute inset-y-0 right-0 pr-4 flex items-center pointer-events-none text-indigo-400">
+                          <ChevronDown size={16} />
+                       </div>
+                    </div>
+                    <p className="text-[10px] text-gray-400 mt-1 pl-1">This will be the cycle marked as cleared.</p>
+                 </div>
+                 
+                 {/* Payment Date */}
+                 <div>
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase mb-1">Payment Received Date</label>
+                    <input 
+                      type="date" 
+                      value={paymentDate} 
+                      onChange={(e) => setPaymentDate(e.target.value)} 
+                      className="w-full px-4 py-3 rounded-xl border-2 border-indigo-100 bg-white focus:outline-none focus:border-indigo-500 font-bold text-gray-800"
+                    />
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-3 pt-2">
+                    <button onClick={() => { setIsPaymentModalOpen(false); setEditingFeeId(null); }} className="py-3 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200">
+                       Cancel
+                    </button>
+                    <button onClick={() => submitPayment(true)} className="py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200">
+                       Save
+                    </button>
+                 </div>
+                 
+                 <button 
+                   onClick={handleSaveAndWhatsApp}
+                   className="w-full py-3 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 shadow-lg shadow-green-200 flex items-center justify-center gap-2"
+                 >
+                    <Send size={18} /> Save & Send WhatsApp
+                 </button>
+
+                 {!editingFeeId && nextStudent && (
+                    <button 
+                       onClick={handleSaveAndNext}
+                       className="w-full py-3 bg-indigo-50 text-indigo-600 rounded-xl font-bold hover:bg-indigo-100 flex items-center justify-center gap-2"
+                    >
+                       Save & Next <ArrowRight size={18} />
+                    </button>
+                 )}
               </div>
-            </div>
-          </div>
+           </div>
         </div>
       )}
     </div>
   );
 };
+
 export default FeeTracker;

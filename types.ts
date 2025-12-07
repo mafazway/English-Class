@@ -14,6 +14,7 @@ export interface Student {
   photo?: string; // Base64 string of the student's photo
   consecutiveAbsences?: number; // Added for attendance tracking
   lastReminderSentAt?: string; // ISO Timestamp for fee reminders
+  reminderCount?: number; // Count of fee reminders sent since last payment
   lastInquirySentDate?: string; // ISO Timestamp for absence inquiries
 }
 

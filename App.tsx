@@ -1,3 +1,6 @@
+
+
+
 import React, { useState, useEffect } from 'react';
 import { Student, ClassGroup, AttendanceRecord, FeeRecord, ExamRecord, View, CloudConfig } from './types';
 import Dashboard from './components/Dashboard';
@@ -16,14 +19,27 @@ import toast, { Toaster } from 'react-hot-toast';
 import { useOfflineSync } from './hooks/useOfflineSync';
 import { supabaseConfig } from './supabaseConfig';
 
+// Helper for safe JSON parsing from localStorage
+const loadLocal = <T,>(key: string, fallback: T): T => {
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const item = localStorage.getItem(key);
+    return item ? JSON.parse(item) : fallback;
+  } catch (e) {
+    console.error(`Failed to load ${key}`, e);
+    return fallback;
+  }
+};
+
 const App: React.FC = () => {
   // --- STATE MANAGEMENT ---
+  // Use Lazy Initialization to prevent overwriting localStorage on initial render
   const [view, setView] = useState<View>('dashboard');
-  const [students, setStudents] = useState<Student[]>([]);
-  const [classes, setClasses] = useState<ClassGroup[]>([]);
-  const [attendance, setAttendance] = useState<AttendanceRecord[]>([]);
-  const [feeRecords, setFeeRecords] = useState<FeeRecord[]>([]);
-  const [examRecords, setExamRecords] = useState<ExamRecord[]>([]);
+  const [students, setStudents] = useState<Student[]>(() => loadLocal('students', []));
+  const [classes, setClasses] = useState<ClassGroup[]>(() => loadLocal('classes', []));
+  const [attendance, setAttendance] = useState<AttendanceRecord[]>(() => loadLocal('attendance', []));
+  const [feeRecords, setFeeRecords] = useState<FeeRecord[]>(() => loadLocal('fees', []));
+  const [examRecords, setExamRecords] = useState<ExamRecord[]>(() => loadLocal('exams', []));
   
   // UX State
   const [shouldOpenStudentModal, setShouldOpenStudentModal] = useState(false);
@@ -46,30 +62,8 @@ const App: React.FC = () => {
 
   // --- PERSISTENCE & INIT ---
 
-  // Load from Local Storage on Mount
+  // Check for Promotion on Mount (Jan 1-15)
   useEffect(() => {
-    const loadData = () => {
-      try {
-        const s = localStorage.getItem('students');
-        const c = localStorage.getItem('classes');
-        const a = localStorage.getItem('attendance');
-        const f = localStorage.getItem('fees');
-        const e = localStorage.getItem('exams');
-        // Removed local storage check for cloudConfig to enforce hardcoded credentials
-
-        if (s) setStudents(JSON.parse(s));
-        if (c) setClasses(JSON.parse(c));
-        if (a) setAttendance(JSON.parse(a));
-        if (f) setFeeRecords(JSON.parse(f));
-        if (e) setExamRecords(JSON.parse(e));
-        
-      } catch (err) {
-        console.error("Failed to load local data", err);
-      }
-    };
-    loadData();
-
-    // Check for Promotion (Jan 1-15)
     const today = new Date();
     if (today.getMonth() === 0 && today.getDate() <= 15) {
        const hasPromoted = localStorage.getItem(`promoted_${currentYear}`);
@@ -136,6 +130,7 @@ const App: React.FC = () => {
             joinedDate: x.joined_date,
             photo: x.photo,
             lastReminderSentAt: x.last_reminder_sent_at,
+            reminderCount: x.reminder_count || 0,
             lastInquirySentDate: x.last_inquiry_sent_date
          }));
          setStudents(mappedStudents);
@@ -163,7 +158,7 @@ const App: React.FC = () => {
              id: x.id, 
              studentId: x.student_id, 
              amount: x.amount, 
-             date: x.paid_date, 
+             date: x.paid_date, // Map paid_date to local date
              notes: x.notes, 
              receiptSent: x.receipt_sent,
              billingMonth: x.billing_month,
@@ -173,7 +168,12 @@ const App: React.FC = () => {
 
        if (eRes.data) {
           setExamRecords(eRes.data.map((x: any) => ({
-             id: x.id, studentId: x.student_id, testName: x.subject, score: x.marks, total: x.total, date: x.exam_date
+             id: x.id, 
+             studentId: x.student_id, 
+             testName: x.subject, 
+             score: x.marks, 
+             total: x.total, 
+             date: x.exam_date // Map exam_date to local date
           })));
        }
 
@@ -219,6 +219,7 @@ const App: React.FC = () => {
       joined_date: s.joinedDate || null, 
       photo: s.photo || null,
       last_reminder_sent_at: s.lastReminderSentAt || null,
+      reminder_count: s.reminderCount || 0,
       last_inquiry_sent_date: s.lastInquirySentDate || null
     };
 
@@ -241,6 +242,7 @@ const App: React.FC = () => {
       joined_date: s.joinedDate, 
       photo: s.photo,
       last_reminder_sent_at: s.lastReminderSentAt,
+      reminder_count: s.reminderCount || 0,
       last_inquiry_sent_date: s.lastInquirySentDate
     };
     syncMutation('students', 'UPSERT', dbPayload);

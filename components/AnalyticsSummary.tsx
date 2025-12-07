@@ -13,6 +13,12 @@ interface Props {
 const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords }) => {
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Helper: Normalize string for comparison (e.g. "Grade 05" -> "5")
+  const getNormalizedGrade = (str?: string) => {
+    if (!str) return '';
+    return str.toString().replace(/\D/g, ''); 
+  };
+
   // 1. Student Demographics & Gender
   const studentStats = useMemo(() => {
     const gradeMap: Record<string, number> = {};
@@ -54,45 +60,136 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
       .sort((a, b) => a.grade.localeCompare(b.grade, undefined, { numeric: true }));
   }, [students]);
 
-  // 2. Attendance Rate (Current Month)
+  // 2. Attendance Rate (Current Month) - ROBUST LOGIC
   const attendanceStats = useMemo(() => {
     const now = new Date();
+    // Filter for current month AND non-cancelled records
     const currentMonthRecords = attendance.filter(r => {
       const d = new Date(r.date);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && r.status !== 'cancelled';
     });
 
-    if (currentMonthRecords.length === 0 || students.length === 0) return { rate: 0, label: 'No data yet' };
+    if (currentMonthRecords.length === 0 || students.length === 0) return { rate: 0, label: 'This Month' };
 
     let totalPresent = 0;
+    let totalAbsent = 0;
+
     currentMonthRecords.forEach(r => {
-      totalPresent += r.studentIdsPresent.length;
+      const presentIds = new Set(r.studentIdsPresent);
+      const presentCount = presentIds.size;
+      
+      totalPresent += presentCount;
+
+      // --- LOGIC TO DETERMINE "TOTAL EXPECTED STUDENTS" ---
+      let expectedStudents: Student[] = [];
+      const recordClassId = r.classId || '';
+
+      if (recordClassId === 'All' || recordClassId === 'general') {
+          // If class is "All", everyone is expected
+          expectedStudents = students;
+      } else {
+          // Try to match by Grade Number
+          const rNum = getNormalizedGrade(recordClassId);
+          
+          if (rNum) {
+             expectedStudents = students.filter(s => getNormalizedGrade(s.grade) === rNum);
+          } else {
+             // Exact match attempt
+             expectedStudents = students.filter(s => s.grade === recordClassId);
+          }
+
+          // INTELLIGENT FALLBACK:
+          // If we couldn't match the class name to students (e.g. Class Name: "Evening Batch"),
+          // but students ARE marked present, let's look at WHO is present.
+          // If most attendees are Grade 5, assume it was a Grade 5 class.
+          if (expectedStudents.length === 0 && presentCount > 0) {
+              const gradeCounts: Record<string, number> = {};
+              r.studentIdsPresent.forEach(id => {
+                  const s = students.find(st => st.id === id);
+                  if (s && s.grade) {
+                      const g = getNormalizedGrade(s.grade);
+                      if (g) gradeCounts[g] = (gradeCounts[g] || 0) + 1;
+                  }
+              });
+
+              // Find dominant grade
+              let dominantGradeNum = '';
+              let maxCount = 0;
+              Object.entries(gradeCounts).forEach(([g, c]) => {
+                  if (c > maxCount) { maxCount = c; dominantGradeNum = g; }
+              });
+
+              if (dominantGradeNum) {
+                  expectedStudents = students.filter(s => getNormalizedGrade(s.grade) === dominantGradeNum);
+              }
+          }
+      }
+
+      // If after all logic, we found expected students, calculate absents.
+      // If expectedStudents is still empty (rare), we can't count absents, only present.
+      if (expectedStudents.length > 0) {
+          const absents = expectedStudents.filter(s => !presentIds.has(s.id)).length;
+          totalAbsent += absents;
+      }
     });
 
-    // Approximation: Total slots = Number of classes held * Total Active Students
-    const totalSlots = currentMonthRecords.length * students.length; 
-    const rate = Math.round((totalPresent / totalSlots) * 100) || 0;
+    const totalSlots = totalPresent + totalAbsent;
+    
+    if (totalSlots === 0) return { rate: 0, label: 'This Month' };
+
+    const rawRate = Math.round((totalPresent / totalSlots) * 100);
+    // Clamp to 100 just in case data is weird, but logic above should prevent overflow naturally
+    const rate = Math.min(rawRate, 100);
     
     return { rate, label: 'This Month' };
   }, [attendance, students]);
 
-  // 3. Top Absentees (Risk List)
-  const absenteesList = useMemo(() => {
-    const absenceCount: Record<string, number> = {};
+  // 3. Absentees grouped by Grade
+  const absenteesByGrade = useMemo(() => {
+    const absenceCounts: Record<string, number> = {};
     
-    attendance.forEach(r => {
-      students.forEach(s => {
+    // Only consider active classes
+    const activeRecords = attendance.filter(r => r.status !== 'cancelled');
+
+    activeRecords.forEach(r => {
+      // Reuse normalization logic
+      const rNum = (r.classId === 'general' || r.classId === 'All') ? 'All' : getNormalizedGrade(r.classId);
+
+      const relevantStudents = students.filter(s => {
+         if (rNum === 'All') return true;
+         const sNum = getNormalizedGrade(s.grade);
+         return sNum && rNum && sNum === rNum;
+      });
+
+      // Count absence only if student was expected but not present
+      relevantStudents.forEach(s => {
         if (!r.studentIdsPresent.includes(s.id)) {
-           absenceCount[s.name] = (absenceCount[s.name] || 0) + 1;
+           absenceCounts[s.id] = (absenceCounts[s.id] || 0) + 1;
         }
       });
     });
 
-    const topRisks = Object.entries(absenceCount)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3);
-      
-    return topRisks;
+    // Map counts back to students and group by grade
+    const allAbsentees = students.map(s => ({
+        id: s.id,
+        name: s.name,
+        grade: s.grade || 'Unknown',
+        count: absenceCounts[s.id] || 0
+    })).filter(s => s.count > 0);
+
+    const grouped: Record<string, typeof allAbsentees> = {};
+    allAbsentees.forEach(a => {
+        if (!grouped[a.grade]) grouped[a.grade] = [];
+        grouped[a.grade].push(a);
+    });
+
+    // Sort: Grades numerically, then Students by count descending
+    const result = Object.entries(grouped).map(([grade, list]) => ({
+        grade,
+        students: list.sort((a, b) => b.count - a.count).slice(0, 3) // Top 3 per grade
+    })).sort((a, b) => a.grade.localeCompare(b.grade, undefined, { numeric: true }));
+
+    return result;
   }, [attendance, students]);
 
   // 4. Fee Status (Current Month)
@@ -202,24 +299,32 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
               </div>
            </Card>
 
-           {/* Card 3: Top Absentees */}
-           <Card className="p-3 bg-red-50/50 border-red-100">
-              <div className="flex items-start justify-between mb-2">
+           {/* Card 3: Top Absentees Grouped by Grade */}
+           <Card className="p-3 bg-red-50/50 border-red-100 overflow-hidden flex flex-col max-h-48">
+              <div className="flex items-start justify-between mb-2 flex-shrink-0">
                  <h4 className="text-[10px] font-bold text-red-400 uppercase">Most Absent</h4>
                  <AlertTriangle size={14} className="text-red-400" />
               </div>
-              <ul className="space-y-1">
-                 {absenteesList.length > 0 ? (
-                    absenteesList.map(([name, count]) => (
-                       <li key={name} className="flex justify-between items-center text-[10px]">
-                          <span className="text-gray-700 truncate max-w-[70px] font-medium">{name}</span>
-                          <span className="bg-red-100 text-red-700 px-1.5 rounded-full font-bold">{count}</span>
-                       </li>
+              
+              <div className="flex-1 overflow-y-auto pr-1 space-y-2">
+                 {absenteesByGrade.length > 0 ? (
+                    absenteesByGrade.map(group => (
+                       <div key={group.grade}>
+                          <h5 className="text-[9px] font-bold text-red-300 uppercase mb-0.5 tracking-wider">Grade {group.grade}</h5>
+                          <ul className="space-y-1">
+                             {group.students.map(s => (
+                                <li key={s.id} className="flex justify-between items-center text-[10px] pl-2 border-l-2 border-red-200 hover:bg-red-50 transition-colors rounded-r-md">
+                                   <span className="text-gray-700 truncate flex-1 font-medium pl-1">{s.name}</span>
+                                   <span className="text-[9px] font-bold text-red-500 whitespace-nowrap">{s.count} days</span>
+                                </li>
+                             ))}
+                          </ul>
+                       </div>
                     ))
                  ) : (
-                    <span className="text-[10px] text-gray-400">No data available</span>
+                    <span className="text-[10px] text-gray-400 flex items-center gap-1"><CheckCircle2 size={10}/> No major absentees</span>
                  )}
-              </ul>
+              </div>
            </Card>
 
            {/* Card 4: Fee Status (Pie Chart) */}
