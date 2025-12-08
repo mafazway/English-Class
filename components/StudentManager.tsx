@@ -1,7 +1,11 @@
 
+
+
+
+
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Student, FeeRecord, ExamRecord } from '../types';
-import { Plus, User, Phone, Search, X, Edit2, Trash2, Camera, Contact, MessageCircle, Filter, UserCircle, CheckCircle, Loader2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, User, Phone, Search, X, Edit2, Trash2, Camera, Contact, MessageCircle, Filter, UserCircle, CheckCircle, Loader2, ChevronLeft, ChevronRight, PauseCircle, PlayCircle } from 'lucide-react';
 import { Button, Card, Input, TextArea, Select } from './UIComponents';
 import toast from 'react-hot-toast';
 import { formatSLNumber } from '../utils';
@@ -67,7 +71,8 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
         gender: 'Male', // Default
         notes: '',
         joinedDate: new Date().toISOString().slice(0, 10),
-        photo: ''
+        photo: '',
+        status: 'active'
       });
       // Focus Name input slightly after modal opens
       setTimeout(() => nameInputRef.current?.focus(), 100);
@@ -102,7 +107,8 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
           mobileNumber: '', 
           whatsappNumber: '',
           notes: '',
-          photo: ''
+          photo: '',
+          status: 'active'
         }));
 
         // Auto Focus Name Field for next entry
@@ -275,21 +281,21 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
 
       {/* Search & Filter */}
       <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+        <div className="relative flex-1 group">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-indigo-500" size={18} />
           <input 
             type="text" 
             placeholder="Search name or ID..." 
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-3 rounded-xl border border-gray-200 bg-gray-100 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-700 placeholder-gray-400 transition-colors"
+            className="w-full pl-10 pr-4 py-3.5 rounded-2xl border border-transparent bg-white shadow-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-gray-800 placeholder-gray-400 transition-all font-medium"
           />
         </div>
         <div className="w-1/3 min-w-[110px]">
           <select 
             value={selectedGradeFilter}
             onChange={(e) => setSelectedGradeFilter(e.target.value)}
-            className="w-full h-full px-3 py-3 rounded-xl border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-gray-700 appearance-none text-sm font-medium"
+            className="w-full h-full px-4 py-3.5 rounded-2xl border border-transparent bg-white shadow-sm focus:outline-none focus:ring-4 focus:ring-indigo-500/10 text-gray-700 appearance-none text-sm font-bold"
             style={{ backgroundImage: `url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='gray' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.7rem center', backgroundSize: '1em' }}
           >
             <option value="">All Grades</option>
@@ -309,54 +315,60 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
             {selectedGradeFilter && <p className="text-sm text-gray-400">Try changing the grade filter.</p>}
           </div>
         ) : (
-          filteredStudents.map(student => (
-            <Card 
-              key={student.id} 
-              className="p-4 flex justify-between items-start active:scale-[0.99] transition-transform cursor-pointer group hover:border-indigo-300 relative"
-              onClick={() => openModal(student)}
-            >
-              <div className="flex-1 flex items-start gap-4">
-                {/* Avatar Display */}
-                <div className="flex-shrink-0 w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 font-bold text-lg overflow-hidden border border-gray-100">
-                  {student.photo ? (
-                    <img src={student.photo} alt={student.name} className="w-full h-full object-cover" />
-                  ) : (
-                    student.name.charAt(0)
-                  )}
+          filteredStudents.map(student => {
+             const isSuspended = student.status === 'temporary_suspended';
+             
+             return (
+              <Card 
+                key={student.id} 
+                className={`p-4 flex justify-between items-center active:scale-[0.99] transition-transform cursor-pointer group hover:border-indigo-100 relative ${isSuspended ? 'opacity-70 bg-gray-100 border-gray-200' : ''}`}
+                onClick={() => openModal(student)}
+              >
+                <div className="flex-1 flex items-center gap-4">
+                  {/* Avatar Display */}
+                  <div className={`flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center text-gray-400 font-bold text-lg overflow-hidden border-2 ${isSuspended ? 'bg-gray-200 border-gray-300' : 'bg-gray-100 border-white shadow-sm'}`}>
+                    {student.photo ? (
+                      <img src={student.photo} alt={student.name} className={`w-full h-full object-cover ${isSuspended ? 'grayscale' : ''}`} />
+                    ) : (
+                      student.name.charAt(0)
+                    )}
+                  </div>
+                  
+                  <div className="min-w-0">
+                     <div className="flex items-center gap-2">
+                       <h3 className="font-bold text-gray-800 text-base leading-tight truncate">{student.name}</h3>
+                       {student.gender === 'Female' && <span className="text-[10px] bg-pink-50 text-pink-500 px-1.5 py-0.5 rounded-full font-bold">F</span>}
+                     </div>
+                     <p className="text-xs text-gray-500 font-bold uppercase tracking-wide mt-0.5">Grade {student.grade} <span className="text-gray-300 mx-1">|</span> {student.admissionNumber || 'No ID'}</p>
+                     
+                     {/* Suspended Badge */}
+                     {isSuspended && (
+                        <div className="inline-flex items-center gap-1 bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-md text-[10px] font-bold mt-1">
+                           <PauseCircle size={10} /> Temporarily Left
+                        </div>
+                     )}
+                  </div>
                 </div>
-                
-                <div className="min-w-0">
-                   <div className="flex items-center gap-2">
-                     <h3 className="font-bold text-gray-800 text-lg leading-tight truncate">{student.name}</h3>
-                     {student.gender === 'Female' && <span className="text-[10px] bg-pink-50 text-pink-500 px-1.5 py-0.5 rounded-full font-bold">F</span>}
-                   </div>
-                   <p className="text-sm text-gray-500 font-medium">Grade {student.grade} <span className="text-gray-300">•</span> {student.admissionNumber || 'No ID'}</p>
-                   {student.parentName && <p className="text-xs text-gray-400 mt-1 flex items-center gap-1"><UserCircle size={10} /> {student.parentName}</p>}
-                </div>
-              </div>
 
-              {/* Action Buttons */}
-              <div className="flex flex-col gap-2 z-10">
-                 {student.mobileNumber && (
-                    <button onClick={(e) => { e.stopPropagation(); window.open(`tel:${student.mobileNumber}`)}} className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-colors">
-                       <Phone size={16} />
-                    </button>
-                 )}
-                 {student.whatsappNumber && (
-                    <button onClick={(e) => { e.stopPropagation(); window.open(`https://wa.me/${formatSLNumber(student.whatsappNumber)}`)}} className="p-2 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-colors">
-                       <MessageCircle size={16} />
-                    </button>
-                 )}
-              </div>
-            </Card>
-          ))
+                {/* Action Buttons */}
+                <div className="flex flex-row gap-2 z-10 pl-2">
+                   {student.whatsappNumber && (
+                      <button onClick={(e) => { e.stopPropagation(); window.open(`https://wa.me/${formatSLNumber(student.whatsappNumber)}`)}} className="p-2.5 bg-green-50 text-green-600 rounded-full hover:bg-green-100 transition-colors shadow-sm">
+                         <MessageCircle size={18} />
+                      </button>
+                   )}
+                   <ChevronRight size={20} className="text-gray-300 ml-1 self-center" />
+                </div>
+              </Card>
+            );
+          })
         )}
       </div>
 
       {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-fade-in backdrop-blur-sm">
-          <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl animate-slide-up sm:animate-scale-in max-h-[90vh] relative flex flex-col shadow-2xl">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2rem] sm:rounded-[2rem] animate-slide-up sm:animate-scale-in max-h-[90vh] relative flex flex-col shadow-2xl">
             
             {/* FLOATING NAVIGATION BUTTONS */}
             {editingId && (
@@ -364,7 +376,7 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
                  {prevStudent && (
                    <button 
                       onClick={() => openModal(prevStudent)}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-gray-200/50 backdrop-blur-md text-gray-600 shadow-lg hover:bg-white/80 transition-all active:scale-95 border border-white/20"
+                      className="absolute left-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/40 backdrop-blur-md text-gray-700 shadow-lg hover:bg-white/60 transition-all active:scale-95 border border-white/40"
                       title="Previous Student"
                    >
                       <ChevronLeft size={24} />
@@ -373,7 +385,7 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
                  {nextStudent && (
                    <button 
                       onClick={() => openModal(nextStudent)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-gray-200/50 backdrop-blur-md text-gray-600 shadow-lg hover:bg-white/80 transition-all active:scale-95 border border-white/20"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 z-20 p-2 rounded-full bg-white/40 backdrop-blur-md text-gray-700 shadow-lg hover:bg-white/60 transition-all active:scale-95 border border-white/40"
                       title="Next Student"
                    >
                       <ChevronRight size={24} />
@@ -409,13 +421,38 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
                 </div>
               </div>
               
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-5">
+                
+                {/* ACTIVE / SUSPENDED TOGGLE (Only in Edit Mode) */}
+                {editingId && (
+                   <div className={`p-4 rounded-2xl border flex items-center justify-between ${formData.status === 'temporary_suspended' ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50 border-gray-100'}`}>
+                      <div className="flex items-center gap-3">
+                         {formData.status === 'temporary_suspended' ? <PauseCircle className="text-yellow-600" /> : <PlayCircle className="text-green-600" />}
+                         <div>
+                            <p className={`text-sm font-bold ${formData.status === 'temporary_suspended' ? 'text-yellow-800' : 'text-gray-800'}`}>
+                               {formData.status === 'temporary_suspended' ? 'Student Temporarily Left' : 'Active Student'}
+                            </p>
+                            <p className="text-[10px] text-gray-500 mt-0.5">
+                               {formData.status === 'temporary_suspended' ? 'Hidden from attendance lists.' : 'Visible in all lists.'}
+                            </p>
+                         </div>
+                      </div>
+                      <button 
+                         type="button"
+                         onClick={() => setFormData(prev => ({ ...prev, status: prev.status === 'temporary_suspended' ? 'active' : 'temporary_suspended' }))}
+                         className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${formData.status === 'temporary_suspended' ? 'bg-yellow-200 text-yellow-800' : 'bg-gray-200 text-gray-600'}`}
+                      >
+                         {formData.status === 'temporary_suspended' ? 'Resume' : 'Suspend'}
+                      </button>
+                   </div>
+                )}
+
                 {/* Photo & ID Section */}
-                <div className="flex gap-4">
+                <div className="flex gap-5">
                   <div className="relative">
                     <div 
                       onClick={handleImageClick}
-                      className={`w-20 h-20 rounded-2xl bg-gray-100 border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:border-indigo-400 overflow-hidden relative ${isCompressing ? 'opacity-75 pointer-events-none' : ''}`}
+                      className={`w-24 h-24 rounded-[1.5rem] bg-gray-50 border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:border-indigo-400 overflow-hidden relative shadow-sm ${isCompressing ? 'opacity-75 pointer-events-none' : ''}`}
                     >
                       {isCompressing ? (
                         <div className="flex flex-col items-center">
@@ -425,7 +462,7 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
                       ) : formData.photo ? (
                         <img src={formData.photo} alt="Preview" className="w-full h-full object-cover" />
                       ) : (
-                        <Camera className="text-gray-400" size={24} />
+                        <Camera className="text-gray-300" size={28} />
                       )}
                     </div>
                     <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept="image/*" />
@@ -437,13 +474,14 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
                       placeholder="001" 
                       value={formData.admissionNumber || ''} 
                       onChange={e => setFormData({...formData, admissionNumber: e.target.value})} 
+                      className="!mb-0"
                     />
-                    <div className="flex gap-2">
-                       <label className={`flex-1 flex items-center justify-center px-3 py-2 rounded-lg border text-sm font-bold cursor-pointer transition-all ${formData.gender === 'Male' ? 'bg-blue-50 border-blue-200 text-blue-600' : 'border-gray-200 text-gray-500'}`}>
+                    <div className="flex gap-2 pt-2">
+                       <label className={`flex-1 flex items-center justify-center px-3 py-3 rounded-2xl border text-sm font-bold cursor-pointer transition-all ${formData.gender === 'Male' ? 'bg-blue-50 border-blue-200 text-blue-600 shadow-sm' : 'border-gray-200 text-gray-500 bg-white'}`}>
                           <input type="radio" name="gender" className="hidden" checked={formData.gender === 'Male'} onChange={() => setFormData({...formData, gender: 'Male'})} />
                           Male
                        </label>
-                       <label className={`flex-1 flex items-center justify-center px-3 py-2 rounded-lg border text-sm font-bold cursor-pointer transition-all ${formData.gender === 'Female' ? 'bg-pink-50 border-pink-200 text-pink-600' : 'border-gray-200 text-gray-500'}`}>
+                       <label className={`flex-1 flex items-center justify-center px-3 py-3 rounded-2xl border text-sm font-bold cursor-pointer transition-all ${formData.gender === 'Female' ? 'bg-pink-50 border-pink-200 text-pink-600 shadow-sm' : 'border-gray-200 text-gray-500 bg-white'}`}>
                           <input type="radio" name="gender" className="hidden" checked={formData.gender === 'Female'} onChange={() => setFormData({...formData, gender: 'Female'})} />
                           Female
                        </label>
@@ -452,12 +490,12 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
                 </div>
 
                 {/* Name Input with Contact Import & Ref */}
-                <div className="relative">
-                   <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-1.5 ml-1">Student Name</label>
+                <div className="relative group">
+                   <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2 ml-1 transition-colors group-focus-within:text-indigo-600">Student Name</label>
                    <div className="flex gap-2">
                       <input 
                         ref={nameInputRef}
-                        className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all text-gray-800 placeholder-gray-400 bg-gray-50/50 focus:bg-white"
+                        className="w-full px-4 py-3.5 rounded-2xl border border-transparent bg-gray-50/80 focus:bg-white focus:border-indigo-100 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all text-gray-800 placeholder-gray-400 font-bold"
                         placeholder="Enter Full Name"
                         value={formData.name || ''}
                         onChange={e => setFormData({...formData, name: e.target.value})}
@@ -466,7 +504,7 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
                       <button 
                         type="button"
                         onClick={handleImportContact}
-                        className="px-3 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100 hover:bg-indigo-100 flex items-center justify-center"
+                        className="px-4 bg-indigo-50 text-indigo-600 rounded-2xl border border-indigo-100 hover:bg-indigo-100 flex items-center justify-center transition-colors"
                         title="Import from Contacts"
                       >
                          <Contact size={20} />
@@ -476,21 +514,21 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
 
                 {/* --- STUDENT SUMMARY STATS (NEW) --- */}
                 {editingId && studentStats && (
-                  <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 flex justify-between items-center text-xs font-medium text-indigo-900 animate-fade-in">
-                    <div className="flex items-center gap-2">
-                      <span className="p-1.5 bg-white rounded-lg shadow-sm text-lg">💰</span>
+                  <div className="bg-gradient-to-r from-indigo-50 to-white p-4 rounded-2xl border border-indigo-100 flex justify-between items-center text-xs font-medium text-indigo-900 animate-fade-in shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-white rounded-xl shadow-sm text-lg">💰</div>
                       <div>
-                        <p className="opacity-60 text-[10px] uppercase tracking-wide">Last Paid</p>
-                        <p className="font-bold">{studentStats.lastPaidDate}</p>
+                        <p className="opacity-60 text-[9px] uppercase tracking-wider font-bold">Last Paid</p>
+                        <p className="font-bold text-sm">{studentStats.lastPaidDate}</p>
                       </div>
                     </div>
-                    <div className="w-px h-8 bg-indigo-200"></div>
-                    <div className="flex items-center gap-2 text-right">
+                    <div className="w-px h-8 bg-indigo-100"></div>
+                    <div className="flex items-center gap-3 text-right">
                       <div>
-                        <p className="opacity-60 text-[10px] uppercase tracking-wide">Last Exam</p>
-                        <p className="font-bold">{studentStats.lastExamStr}</p>
+                        <p className="opacity-60 text-[9px] uppercase tracking-wider font-bold">Last Exam</p>
+                        <p className="font-bold text-sm">{studentStats.lastExamStr}</p>
                       </div>
-                      <span className="p-1.5 bg-white rounded-lg shadow-sm text-lg">📊</span>
+                      <div className="p-2 bg-white rounded-xl shadow-sm text-lg">📊</div>
                     </div>
                   </div>
                 )}
@@ -509,7 +547,7 @@ const StudentManager: React.FC<Props> = ({ students, feeRecords, examRecords, on
 
                 <TextArea label="Notes / Address" placeholder="Any additional details..." value={formData.notes || ''} onChange={e => setFormData({...formData, notes: e.target.value})} rows={2} />
 
-                <Button type="submit" className="w-full text-lg py-3 mt-2 shadow-xl shadow-indigo-100">
+                <Button type="submit" className="w-full text-lg py-4 mt-2 shadow-xl shadow-indigo-200/50">
                   {editingId ? 'Save Changes' : 'Add Student'}
                 </Button>
               </form>

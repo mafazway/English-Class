@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { Student, ClassGroup, AttendanceRecord } from '../types';
 import { Save, Calendar as CalendarIcon, Check, X, ChevronLeft, ChevronRight, GraduationCap, Clock, MessageCircle, CalendarOff, CheckCheck, Coffee, ArrowRight, AlertTriangle, Search, Filter, FileText, CheckSquare, BarChart3, Download } from 'lucide-react';
@@ -87,6 +86,9 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     }
 
     return students.filter(s => {
+      // 0. STATUS CHECK: Suspended students are hidden from attendance
+      if (s.status === 'temporary_suspended') return false;
+
       // 1. JOIN DATE CHECK: Ignore students who haven't joined yet
       if (s.joinedDate && date < s.joinedDate) return false;
 
@@ -168,9 +170,16 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
     const uniqueDates = Array.from(new Set(rangeRecords.map(r => r.date))).sort();
 
     // 3. Filter Students by Grade
-    const targetStudents = reportGradeFilter === 'All' 
-       ? students 
-       : students.filter(s => s.grade === reportGradeFilter);
+    // NOTE: Suspended students MIGHT appear in reports if they were active during that period,
+    // but the prompt implies "off attendance". For simplicity, we filter suspended unless they have records?
+    // User request: "off his attendance until he joints again". Usually implies hidden from marking.
+    // For reports, it's safer to exclude them if they are CURRENTLY suspended, OR include them?
+    // Let's hide them to keep stats clean as per "dashboard shows only available".
+    const targetStudents = students.filter(s => {
+        if (s.status === 'temporary_suspended') return false; // Exclude from report
+        if (reportGradeFilter !== 'All' && s.grade !== reportGradeFilter) return false;
+        return true;
+    });
 
     // 4. Calculate Stats for each student
     const stats = targetStudents.map(student => {
@@ -807,11 +816,14 @@ const AttendanceTracker: React.FC<AttendanceTrackerProps> = ({ students = [], cl
       )}
 
       {/* SAVE BUTTON - Hide on invalid days or cancelled days or in report mode */}
-      {mode === 'mark' && isClassDay && !isCancelled && !isWaitingForFilter && (
-        <div className="fixed bottom-20 left-4 right-4 z-30">
-          <button onClick={handleSave} className="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl shadow-indigo-200 flex items-center justify-center gap-2 active:scale-95 transition-transform">
-            <Save size={20} /> Save Attendance
-          </button>
+      {/* UPDATE: Removed '!isWaitingForFilter' so button is always visible in mark mode on class days */}
+      {mode === 'mark' && isClassDay && !isCancelled && (
+        <div className="fixed bottom-24 left-0 right-0 z-30 flex justify-center pointer-events-none">
+          <div className="w-full max-w-md px-4 pointer-events-auto">
+            <button onClick={handleSave} className="w-full bg-indigo-600 text-white font-bold py-3.5 rounded-2xl shadow-xl shadow-indigo-200 flex items-center justify-center gap-2 active:scale-95 transition-transform">
+              <Save size={20} /> Save Attendance
+            </button>
+          </div>
         </div>
       )}
     </div>

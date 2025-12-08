@@ -16,6 +16,7 @@ export interface Student {
   lastReminderSentAt?: string; // ISO Timestamp for fee reminders
   reminderCount?: number; // Count of fee reminders sent since last payment
   lastInquirySentDate?: string; // ISO Timestamp for absence inquiries
+  status?: 'active' | 'temporary_suspended'; // New status field
 }
 
 export interface ClassGroup {

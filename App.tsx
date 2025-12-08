@@ -1,7 +1,3 @@
-
-
-
-
 import React, { useState, useEffect } from 'react';
 import { Student, ClassGroup, AttendanceRecord, FeeRecord, ExamRecord, View, CloudConfig } from './types';
 import Dashboard from './components/Dashboard';
@@ -12,7 +8,6 @@ import FeeTracker from './components/FeeTracker';
 import MarksTracker from './components/MarksTracker';
 import CloudSettings from './components/CloudSettings';
 import AITeacherAssistant from './components/AITeacherAssistant';
-import QuickActionFab from './components/QuickActionFab';
 import PromotionManager from './components/PromotionManager';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { LayoutGrid, Users, Calendar, BarChart3, CheckSquare, CreditCard } from 'lucide-react';
@@ -132,7 +127,8 @@ const App: React.FC = () => {
             photo: x.photo,
             lastReminderSentAt: x.last_reminder_sent_at,
             reminderCount: x.reminder_count || 0,
-            lastInquirySentDate: x.last_inquiry_sent_date
+            lastInquirySentDate: x.last_inquiry_sent_date,
+            status: x.status || 'active'
          }));
          setStudents(mappedStudents);
        }
@@ -221,7 +217,8 @@ const App: React.FC = () => {
       photo: s.photo || null,
       last_reminder_sent_at: s.lastReminderSentAt || null,
       reminder_count: s.reminderCount || 0,
-      last_inquiry_sent_date: s.lastInquirySentDate || null
+      last_inquiry_sent_date: s.lastInquirySentDate || null,
+      status: s.status || 'active'
     };
 
     return await syncMutation('students', 'UPSERT', dbPayload);
@@ -244,7 +241,8 @@ const App: React.FC = () => {
       photo: s.photo,
       last_reminder_sent_at: s.lastReminderSentAt,
       reminder_count: s.reminderCount || 0,
-      last_inquiry_sent_date: s.lastInquirySentDate
+      last_inquiry_sent_date: s.lastInquirySentDate,
+      status: s.status
     };
     syncMutation('students', 'UPSERT', dbPayload);
   };
@@ -499,18 +497,16 @@ const App: React.FC = () => {
   const NavItem = ({ view: targetView, icon: Icon, label }: { view: View, icon: any, label: string }) => (
     <button 
       onClick={() => setView(targetView)} 
-      className={`flex flex-col items-center justify-center w-full py-2 transition-all ${
+      className={`flex flex-col items-center justify-center w-full py-2 transition-colors duration-200 group ${
         view === targetView 
           ? 'text-indigo-600' 
           : 'text-gray-400 hover:text-gray-600'
       }`}
     >
-      <div className={`p-1 rounded-xl transition-all ${
-        view === targetView ? 'bg-indigo-50 translate-y-[-2px]' : ''
-      }`}>
+      <div className={`transition-transform duration-200 ${view === targetView ? '-translate-y-0.5' : ''}`}>
          <Icon size={24} strokeWidth={view === targetView ? 2.5 : 2} />
       </div>
-      <span className={`text-[10px] font-bold mt-1 ${view === targetView ? 'scale-105' : ''}`}>
+      <span className={`text-[10px] font-bold mt-0.5 ${view === targetView ? 'opacity-100' : 'opacity-70'}`}>
         {label}
       </span>
     </button>
@@ -518,7 +514,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-[100dvh] bg-gray-50 text-gray-800 font-sans">
-       <div className="flex flex-col h-full w-full max-w-md mx-auto bg-white shadow-2xl relative overflow-hidden">
+       <div className="flex flex-col h-full w-full max-w-md mx-auto bg-gray-50 shadow-2xl relative overflow-hidden">
          {/* 1. Global Components */}
          <Toaster position="top-center" />
          
@@ -530,28 +526,21 @@ const App: React.FC = () => {
           />
 
          {/* 2. Main Scrollable Content */}
-         <main className="flex-1 overflow-y-auto scrollbar-hide bg-gray-50/50 relative">
+         <main className="flex-1 overflow-y-auto scrollbar-hide bg-gray-50 relative pb-4">
             {renderView()}
          </main>
 
-         {/* 3. Floating Action Button */}
-         <QuickActionFab 
-           onNavigate={setView} 
-           onAddStudentClick={() => {
-             setView('students');
-             setShouldOpenStudentModal(true);
-           }} 
-         />
-
-         {/* 4. BOTTOM NAVIGATION BAR */}
-         <nav className="flex-shrink-0 bg-white border-t border-gray-100 flex justify-between items-center shadow-[0_-8px_30px_rgba(0,0,0,0.04)] z-50 px-1 pb-safe">
-            <NavItem view="dashboard" icon={LayoutGrid} label="Home" />
-            <NavItem view="students" icon={Users} label="Students" />
-            <NavItem view="timetable" icon={Calendar} label="Time" />
-            <NavItem view="marks" icon={BarChart3} label="Marks" />
-            <NavItem view="attendance" icon={CheckSquare} label="Attend" />
-            <NavItem view="fees" icon={CreditCard} label="Fees" />
-         </nav>
+         {/* 3. BOTTOM NAVIGATION BAR - Fixed Task Bar */}
+         <div className="flex-none bg-white border-t border-gray-200 z-50">
+           <nav className="flex justify-between items-center px-1 py-1">
+              <NavItem view="dashboard" icon={LayoutGrid} label="Home" />
+              <NavItem view="students" icon={Users} label="Students" />
+              <NavItem view="timetable" icon={Calendar} label="Time" />
+              <NavItem view="marks" icon={BarChart3} label="Marks" />
+              <NavItem view="attendance" icon={CheckSquare} label="Attend" />
+              <NavItem view="fees" icon={CreditCard} label="Fees" />
+           </nav>
+         </div>
        </div>
     </div>
   );

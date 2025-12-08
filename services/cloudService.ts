@@ -1,6 +1,7 @@
 
 
 
+
 import { createClient } from '@supabase/supabase-js'
 import { CloudConfig } from '../types';
 
@@ -42,6 +43,7 @@ alter table students add column if not exists photo text;
 alter table students add column if not exists last_reminder_sent_at text;
 alter table students add column if not exists reminder_count numeric;
 alter table students add column if not exists last_inquiry_sent_date text;
+alter table students add column if not exists status text;
 
 alter table students enable row level security;
 drop policy if exists "Public Access Students" on students;

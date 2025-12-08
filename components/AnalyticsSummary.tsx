@@ -1,4 +1,6 @@
 
+
+
 import React, { useState, useMemo } from 'react';
 import { Student, AttendanceRecord, FeeRecord } from '../types';
 import { BarChart3, ChevronDown, ChevronUp, Users, AlertTriangle, CheckCircle2, TrendingUp, User, UserCircle, CalendarCheck, ClipboardList } from 'lucide-react';
@@ -26,6 +28,9 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
     let femaleCount = 0;
 
     students.forEach(s => {
+      // Exclude suspended
+      if (s.status === 'temporary_suspended') return;
+
       const g = s.grade || 'Unknown';
       gradeMap[g] = (gradeMap[g] || 0) + 1;
       
@@ -33,7 +38,9 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
       else maleCount++; // Default to male if undefined or Male
     });
 
-    const total = students.length;
+    // Calculate total based on active only
+    const total = maleCount + femaleCount;
+    
     const sortedGrades = Object.entries(gradeMap).sort((a, b) => 
       a[0].localeCompare(b[0], undefined, { numeric: true })
     );
@@ -48,6 +55,9 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
     const groups: Record<string, { m: number, f: number }> = {};
     
     students.forEach(s => {
+      // Exclude suspended
+      if (s.status === 'temporary_suspended') return;
+
       const g = s.grade || 'Unknown';
       if (!groups[g]) groups[g] = { m: 0, f: 0 };
       
@@ -125,8 +135,11 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
           }
       }
       
-      // NEW FILTER: Only count students who had already joined by this date
-      expectedStudents = expectedStudents.filter(s => !s.joinedDate || r.date >= s.joinedDate);
+      // NEW FILTER: Only count students who had already joined by this date AND are not suspended
+      expectedStudents = expectedStudents.filter(s => {
+         if (s.status === 'temporary_suspended') return false;
+         return !s.joinedDate || r.date >= s.joinedDate;
+      });
 
       // If after all logic, we found expected students, calculate absents.
       // If expectedStudents is still empty (rare), we can't count absents, only present.
@@ -159,6 +172,8 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
       const rNum = (r.classId === 'general' || r.classId === 'All') ? 'All' : getNormalizedGrade(r.classId);
 
       const relevantStudents = students.filter(s => {
+         // CHECK STATUS
+         if (s.status === 'temporary_suspended') return false;
          // CHECK JOIN DATE
          if (s.joinedDate && r.date < s.joinedDate) return false;
 
@@ -176,12 +191,15 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
     });
 
     // Map counts back to students and group by grade
-    const allAbsentees = students.map(s => ({
+    const allAbsentees = students
+      .filter(s => s.status !== 'temporary_suspended') // Ensure suspended not in list
+      .map(s => ({
         id: s.id,
         name: s.name,
         grade: s.grade || 'Unknown',
         count: absenceCounts[s.id] || 0
-    })).filter(s => s.count > 0);
+      }))
+      .filter(s => s.count > 0);
 
     const grouped: Record<string, typeof allAbsentees> = {};
     allAbsentees.forEach(a => {
@@ -203,7 +221,10 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
     const now = new Date();
     let paidCount = 0;
     
-    students.forEach(s => {
+    // Filter active students only
+    const activeList = students.filter(s => s.status !== 'temporary_suspended');
+
+    activeList.forEach(s => {
        const hasPaid = feeRecords.some(r => {
           const d = new Date(r.date);
           return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() && r.studentId === s.id;
@@ -211,8 +232,8 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
        if (hasPaid) paidCount++;
     });
 
-    const unpaidCount = students.length - paidCount;
-    const paidPct = students.length > 0 ? (paidCount / students.length) * 100 : 0;
+    const unpaidCount = activeList.length - paidCount;
+    const paidPct = activeList.length > 0 ? (paidCount / activeList.length) * 100 : 0;
 
     return { paidCount, unpaidCount, paidPct };
   }, [students, feeRecords]);
@@ -235,6 +256,7 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
      // 2. Group by Grade
      const groups: Record<string, { total: number, present: number }> = {};
      students.forEach(s => {
+        if (s.status === 'temporary_suspended') return;
         // Skip students who haven't joined yet if looking at today
         if (s.joinedDate && todayStr < s.joinedDate) return;
 

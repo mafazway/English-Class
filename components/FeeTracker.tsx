@@ -1,7 +1,5 @@
 
-
-
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Student, FeeRecord } from '../types';
 import { ChevronDown, Check, X, DollarSign, MessageCircle, Trash2, ChevronLeft, ChevronRight, ArrowRight, Search, AlertCircle, FileText, Download, Calendar, Send, History, CheckCheck, Edit2, Bell } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -51,7 +49,14 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
   const [isSkipped, setIsSkipped] = useState(false);
   const [skipReason, setSkipReason] = useState("");
 
-  const uniqueGrades = ['All', ...Array.from(new Set((students || []).map(s => s.grade || 'Unknown'))).sort()];
+  // Filter Active Students (Exclude 'temporary_suspended')
+  const activeStudents = useMemo(() => {
+    return (students || []).filter(s => s.status !== 'temporary_suspended');
+  }, [students]);
+
+  const uniqueGrades = useMemo(() => {
+    return ['All', ...Array.from(new Set(activeStudents.map(s => s.grade || 'Unknown'))).sort()];
+  }, [activeStudents]);
 
   // --- HELPERS ---
   const formatDate = (dateString?: string | Date) => {
@@ -343,7 +348,7 @@ const FeeTracker: React.FC<FeeTrackerProps> = ({ students = [], feeRecords = [],
     setIsPaymentModalOpen(true);
   };
 
-  const filteredStudents = (students || []).filter(student => {
+  const filteredStudents = activeStudents.filter(student => {
     if (searchTerm && !student.name.toLowerCase().includes(searchTerm.toLowerCase())) {
         return false;
     }

@@ -2,7 +2,7 @@
 import React, { useState, useRef } from 'react';
 import { CloudConfig } from '../types';
 import { Button, Card, Input } from './UIComponents';
-import { Cloud, Check, AlertCircle, Save, Database, Copy, ChevronDown, ChevronUp, Wrench, Download, Upload, FileJson } from 'lucide-react';
+import { Cloud, Check, AlertCircle, Save, Database, Copy, ChevronDown, ChevronUp, Wrench, Download, Upload, FileJson, RefreshCw } from 'lucide-react';
 import { checkConnection, getSetupSQL } from '../services/cloudService';
 
 interface Props {
@@ -120,7 +120,7 @@ const CloudSettings: React.FC<Props> = ({ config, onSaveConfig, onSyncNow, lastS
              onClick={onSyncNow}
              className="w-full bg-white text-indigo-600 font-bold py-2 rounded-lg hover:bg-indigo-50 active:scale-95 transition-all flex items-center justify-center gap-2"
            >
-             <Save size={18} /> Sync Cloud Data Now
+             <RefreshCw size={18} /> Sync Cloud Data Now
            </button>
         </Card>
       )}

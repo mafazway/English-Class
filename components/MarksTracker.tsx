@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Student, ExamRecord } from '../types';
-import { Plus, Sparkles, Trash2, BarChart3, X, Trophy, Activity, History, Layers, Save, AlertTriangle, Edit2, Search, ChevronDown, Share2, Copy, MessageCircle, Check } from 'lucide-react';
+import { Plus, Sparkles, Trash2, BarChart3, X, Trophy, Activity, History, Layers, Save, AlertTriangle, Edit2, Search, ChevronDown, Share2, Copy, MessageCircle, Check, ArrowUp, ArrowDown, Minus, TrendingUp } from 'lucide-react';
 import { Button, Input, Select } from './UIComponents';
 import { analyzeExamPerformance } from '../services/geminiService';
 import toast from 'react-hot-toast';
@@ -15,7 +15,7 @@ interface Props {
 }
 
 const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord, onUpdateExamRecord, onDeleteExamRecord }) => {
-  const [viewMode, setViewMode] = useState<'individual' | 'bulk'>('individual');
+  const [viewMode, setViewMode] = useState<'individual' | 'bulk' | 'analytics'>('individual');
   
   // --- Individual View State ---
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -120,6 +120,56 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
       count: studentRecords.length
     };
   }, [studentRecords]);
+
+  // ---------------------------------------------------------
+  // ANALYTICS DATA TRANSFORMATION (PIVOT TABLE)
+  // ---------------------------------------------------------
+  const analyticsData = useMemo(() => {
+    if (viewMode !== 'analytics' || !selectedGradeFilter) return null;
+
+    // 1. Get Students in Grade
+    const studentsInGrade = students
+      .filter(s => s.grade === selectedGradeFilter)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    if (studentsInGrade.length === 0) return null;
+
+    // 2. Identify Unique Exams (Columns) & Sort Chronologically
+    const studentIds = studentsInGrade.map(s => s.id);
+    const relevantRecords = examRecords.filter(r => studentIds.includes(r.studentId));
+    
+    // Group meta data for exams to find dates
+    const examMeta: Record<string, { date: string }> = {};
+    relevantRecords.forEach(r => {
+        if (!examMeta[r.testName] || r.date < examMeta[r.testName].date) {
+            examMeta[r.testName] = { date: r.date };
+        }
+    });
+
+    const sortedExamColumns = Object.keys(examMeta).sort((a, b) => {
+        return new Date(examMeta[a].date).getTime() - new Date(examMeta[b].date).getTime();
+    });
+
+    // 3. Build Rows
+    const rows = studentsInGrade.map(student => {
+        const marks: Record<string, { score: number, total: number, pct: number }> = {};
+        
+        relevantRecords
+            .filter(r => r.studentId === student.id)
+            .forEach(r => {
+                marks[r.testName] = { 
+                    score: r.score, 
+                    total: r.total, 
+                    pct: (r.score / r.total) * 100 
+                };
+            });
+
+        return { student, marks };
+    });
+
+    return { columns: sortedExamColumns, rows };
+  }, [viewMode, selectedGradeFilter, students, examRecords]);
+
 
   // --- Handlers ---
 
@@ -337,13 +387,19 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
               onClick={() => setViewMode('individual')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'individual' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
             >
-              Individual
+              Single
             </button>
             <button 
               onClick={() => setViewMode('bulk')}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'bulk' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
             >
-              Bulk Entry
+              Bulk
+            </button>
+            <button 
+              onClick={() => setViewMode('analytics')}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'analytics' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500'}`}
+            >
+              <TrendingUp size={12} /> Analysis
             </button>
           </div>
         </div>
@@ -375,32 +431,36 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
             </button>
           </div>
         ) : (
-          <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-             {/* Bulk Filters Header */}
+          <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar items-center">
+             {/* Bulk/Analytics Filters Header */}
              <select 
-               value={bulkGrade} 
-               onChange={e => setBulkGrade(e.target.value)}
+               value={viewMode === 'analytics' ? selectedGradeFilter : bulkGrade} 
+               onChange={e => viewMode === 'analytics' ? setSelectedGradeFilter(e.target.value) : setBulkGrade(e.target.value)}
                className="bg-indigo-50 border-indigo-100 text-indigo-700 font-bold text-sm rounded-xl px-3 py-2 outline-none focus:ring-2 focus:ring-indigo-500"
              >
                <option value="">Select Grade</option>
                {uniqueGrades.map(g => <option key={g} value={g}>Grade {g}</option>)}
              </select>
              
-             <input 
-               type="text" 
-               placeholder="Exam (e.g. Term 1)"
-               value={bulkExamName}
-               onChange={e => setBulkExamName(e.target.value)}
-               className="bg-white border-gray-200 text-gray-900 border text-sm rounded-xl px-3 py-2 w-32 outline-none focus:ring-2 focus:ring-indigo-500"
-             />
+             {viewMode === 'bulk' && (
+                <>
+                  <input 
+                    type="text" 
+                    placeholder="Exam (e.g. Term 1)"
+                    value={bulkExamName}
+                    onChange={e => setBulkExamName(e.target.value)}
+                    className="bg-white border-gray-200 text-gray-900 border text-sm rounded-xl px-3 py-2 w-32 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
 
-             <input 
-               type="text" 
-               placeholder="Subject"
-               value={bulkSubject}
-               onChange={e => setBulkSubject(e.target.value)}
-               className="bg-white border-gray-200 text-gray-900 border text-sm rounded-xl px-3 py-2 w-28 outline-none focus:ring-2 focus:ring-indigo-500"
-             />
+                  <input 
+                    type="text" 
+                    placeholder="Subject"
+                    value={bulkSubject}
+                    onChange={e => setBulkSubject(e.target.value)}
+                    className="bg-white border-gray-200 text-gray-900 border text-sm rounded-xl px-3 py-2 w-28 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </>
+             )}
           </div>
         )}
       </div>
@@ -484,6 +544,86 @@ const MarksTracker: React.FC<Props> = ({ students, examRecords, onAddExamRecord,
                 </div>
              )}
           </div>
+        )}
+
+        {/* ================= ANALYTICS VIEW ================= */}
+        {viewMode === 'analytics' && (
+           <div className="animate-fade-in pb-10">
+              {!selectedGradeFilter ? (
+                  <div className="text-center py-12 text-gray-400 bg-white rounded-2xl border border-dashed border-gray-200 mx-2">
+                     <TrendingUp size={48} className="mx-auto mb-2 opacity-20" />
+                     <p className="text-sm">Select a Grade to view comparative analysis.</p>
+                  </div>
+              ) : !analyticsData ? (
+                  <div className="text-center py-12 text-gray-400">
+                     <p className="text-sm">No exam data found for Grade {selectedGradeFilter}</p>
+                  </div>
+              ) : (
+                  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden shadow-sm mx-2">
+                     <div className="overflow-x-auto">
+                        <table className="w-full text-sm text-left">
+                           <thead className="bg-gray-50 text-gray-500 font-bold uppercase text-xs border-b border-gray-200">
+                              <tr>
+                                 <th className="px-4 py-3 sticky left-0 bg-gray-50 z-10 border-r border-gray-200 min-w-[140px]">Student Name</th>
+                                 {analyticsData.columns.map(col => (
+                                    <th key={col} className="px-4 py-3 whitespace-nowrap min-w-[120px] text-center">{col}</th>
+                                 ))}
+                              </tr>
+                           </thead>
+                           <tbody className="divide-y divide-gray-100">
+                              {analyticsData.rows.map((row) => (
+                                 <tr key={row.student.id} className="hover:bg-gray-50/50">
+                                    <td className="px-4 py-3 font-bold text-gray-800 sticky left-0 bg-white z-10 border-r border-gray-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)]">
+                                       {row.student.name}
+                                    </td>
+                                    {analyticsData.columns.map((colName, idx) => {
+                                       const mark = row.marks[colName];
+                                       
+                                       // TREND LOGIC: Compare with Previous Column (idx - 1)
+                                       let trend: 'up' | 'down' | 'same' | null = null;
+                                       
+                                       if (mark && idx > 0) {
+                                          const prevColName = analyticsData.columns[idx - 1];
+                                          const prevMark = row.marks[prevColName];
+                                          if (prevMark) {
+                                             if (mark.pct > prevMark.pct) trend = 'up';
+                                             else if (mark.pct < prevMark.pct) trend = 'down';
+                                             else trend = 'same';
+                                          }
+                                       }
+
+                                       return (
+                                          <td key={colName} className="px-4 py-3 text-center">
+                                             {mark ? (
+                                                <div className="flex flex-col items-center">
+                                                   <div className="flex items-center gap-1.5">
+                                                      <span className={`font-bold ${mark.pct >= 75 ? 'text-green-700' : mark.pct >= 50 ? 'text-indigo-700' : 'text-red-600'}`}>
+                                                         {Math.round(mark.pct)}%
+                                                      </span>
+                                                      
+                                                      {/* Trend Indicator */}
+                                                      {trend === 'up' && <ArrowUp size={12} strokeWidth={3} className="text-green-500" />}
+                                                      {trend === 'down' && <ArrowDown size={12} strokeWidth={3} className="text-red-500" />}
+                                                      {trend === 'same' && <Minus size={12} strokeWidth={3} className="text-gray-300" />}
+                                                   </div>
+                                                   <span className="text-[10px] text-gray-400">
+                                                      {mark.score}/{mark.total}
+                                                   </span>
+                                                </div>
+                                             ) : (
+                                                <span className="text-gray-300">-</span>
+                                             )}
+                                          </td>
+                                       );
+                                    })}
+                                 </tr>
+                              ))}
+                           </tbody>
+                        </table>
+                     </div>
+                  </div>
+              )}
+           </div>
         )}
 
         {/* ================= INDIVIDUAL VIEW ================= */}
