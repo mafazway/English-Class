@@ -1,7 +1,7 @@
 
 import React, { useState, useMemo, useRef } from 'react';
 import { Student, ClassGroup, AttendanceRecord, FeeRecord, View, ExamRecord } from '../types';
-import { Users, CheckCircle, FileSpreadsheet, AlertCircle, Save, Cloud, CalendarDays, MoreVertical, Plus, BarChart3, TrendingUp, CreditCard, RefreshCw, Upload, Sun, Wifi, WifiOff, UploadCloud } from 'lucide-react';
+import { Users, CheckCircle, FileSpreadsheet, AlertCircle, Save, Cloud, CalendarDays, MoreVertical, Plus, TrendingUp, CreditCard, RefreshCw, Upload, Sun, Wifi, WifiOff, UploadCloud, Search, X, Calendar } from 'lucide-react';
 import { Card } from './UIComponents';
 import AnalyticsSummary from './AnalyticsSummary';
 
@@ -22,42 +22,12 @@ interface Props {
   pendingSyncCount?: number;
 }
 
-const CircularProgress = ({ 
-  value, 
-  max = 4, 
-  size = 36, 
-  strokeWidth = 3 
-}: { 
-  value: number; 
-  max?: number; 
-  size?: number; 
-  strokeWidth?: number; 
-}) => {
-  const radius = (size - strokeWidth) / 2;
-  const circumference = radius * 2 * Math.PI;
-  const progress = Math.min(value / max, 1);
-  const dash = circumference * progress;
-  const color = value >= 3 ? 'text-emerald-500' : value >= 1 ? 'text-indigo-500' : 'text-gray-300';
-
-  return (
-    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
-      <svg width={size} height={size} className="transform -rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={radius} stroke="currentColor" strokeWidth={strokeWidth} fill="transparent" className="text-gray-100" />
-        <circle cx={size / 2} cy={size / 2} r={radius} stroke="currentColor" strokeWidth={strokeWidth} fill="transparent" strokeDasharray={circumference} strokeDashoffset={circumference - dash} strokeLinecap="round" className={`transition-all duration-1000 ease-out ${color}`} />
-      </svg>
-      {/* Inner Icon/Text */}
-      <div className="absolute text-[9px] font-bold text-gray-500">
-         {value}
-      </div>
-    </div>
-  );
-};
-
 const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords, examRecords, onRestoreData, onNavigate, onBackupComplete, lastBackupDate, cloudConnected, onRefreshData, onAddStudentClick, isOnline = true, pendingSyncCount = 0 }) => {
   
   // --- EXISTING STATE ---
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState(''); // NEW: Search State
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   const totalStudents = students.length;
@@ -67,20 +37,59 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good Morning' : hour < 18 ? 'Good Afternoon' : 'Good Evening';
 
-  // Stats Logic
-  const currentMonthStats = useMemo(() => {
+  // --- SEARCH & ATTENDANCE STATS LOGIC ---
+  const normalize = (str: string | undefined) => str ? str.toString().replace(/\D/g, '') : '';
+
+  const getAttendanceStats = (student: Student) => {
+    const studentId = student.id;
+    const studentGrade = student.grade;
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
-    const thisMonthRecords = attendance.filter(r => {
-      const d = new Date(r.date);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+    
+    // Filter records for this month (excluding cancelled)
+    const relevantRecords = attendance.filter(r => {
+        const d = new Date(r.date);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear && r.status !== 'cancelled';
     });
-    return students.map(student => {
-      const presentCount = thisMonthRecords.filter(r => r.studentIdsPresent.includes(student.id)).length;
-      return { ...student, presentCount };
-    }).sort((a, b) => b.presentCount - a.presentCount);
-  }, [students, attendance]);
+
+    // GROUP BY DATE TO PREVENT DUPLICATE COUNTS
+    const uniqueDates = Array.from(new Set(relevantRecords.map(r => r.date)));
+    
+    let p = 0;
+    let a = 0;
+
+    uniqueDates.forEach(date => {
+        // CHECK JOIN DATE
+        if (student.joinedDate && date < student.joinedDate) return;
+
+        // Get all records for this specific date
+        const dayRecords = relevantRecords.filter(r => r.date === date);
+        
+        // Check if present in ANY record for this day
+        const isPresent = dayRecords.some(r => r.studentIdsPresent.includes(studentId));
+        
+        if (isPresent) {
+            p++;
+        } else {
+            // Check if expected in ANY record for this day
+            const isExpected = dayRecords.some(r => {
+                const rClass = normalize(r.classId);
+                const sGrade = normalize(studentGrade);
+                return r.classId === 'general' || r.classId === 'All' || r.classId === studentGrade || (rClass && sGrade && rClass === sGrade);
+            });
+            
+            if (isExpected) a++;
+        }
+    });
+
+    return { p, a };
+  };
+
+  const filteredStudents = useMemo(() => {
+    if (!searchTerm) return [];
+    return students.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()));
+  }, [students, searchTerm]);
 
   // Fee Alerts Logic (Consistent with FeeTracker)
   const feeAlerts = useMemo(() => {
@@ -255,131 +264,164 @@ const Dashboard: React.FC<Props> = ({ students, classes, attendance, feeRecords,
         <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".json" />
       </header>
 
+      {/* 1.5. SEARCH BAR (Pinned) */}
+      <div className="px-4 py-2 bg-white border-b border-gray-50 sticky top-0 z-10">
+        <div className="relative">
+           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+           <input 
+             type="text" 
+             placeholder="Search student for attendance..." 
+             value={searchTerm}
+             onChange={(e) => setSearchTerm(e.target.value)}
+             className="w-full pl-10 pr-10 py-3 rounded-xl border border-gray-200 bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-gray-700 placeholder-gray-400 transition-colors text-sm font-medium"
+           />
+           {searchTerm && (
+             <button onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:bg-gray-200 rounded-full">
+               <X size={16} />
+             </button>
+           )}
+        </div>
+      </div>
+
       {/* 2. MAIN DASHBOARD CONTENT */}
-      <div className="flex-1 flex flex-col p-4 gap-3 overflow-hidden min-h-0">
+      {/* Scrollable Container for Dashboard Content */}
+      <div className="flex-1 flex flex-col p-4 gap-3 overflow-y-auto">
          
-         {/* Pending Sync Alert */}
-         {!isOnline && pendingSyncCount > 0 && (
-            <div className="bg-orange-100 border border-orange-200 text-orange-800 px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-between shadow-sm">
-               <div className="flex items-center gap-2">
-                  <WifiOff size={14} />
-                  <span>{pendingSyncCount} changes waiting to sync.</span>
-               </div>
-            </div>
-         )}
-         
-         {/* Analytics Section */}
-         <AnalyticsSummary students={students} attendance={attendance} feeRecords={feeRecords} />
+         {/* MODE: SEARCH RESULTS */}
+         {searchTerm ? (
+           <div className="flex-1 space-y-3 pb-20 animate-fade-in">
+              <div className="flex items-center gap-2 text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">
+                 <Calendar size={14} /> {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}
+              </div>
+              
+              {filteredStudents.length === 0 ? (
+                 <div className="text-center py-10 text-gray-400">No students found.</div>
+              ) : (
+                filteredStudents.map(student => {
+                  const stats = getAttendanceStats(student);
+                  return (
+                    <Card key={student.id} className="p-4 flex justify-between items-center bg-white shadow-sm border border-gray-100">
+                      <div>
+                         <h3 className="font-bold text-gray-800">{student.name}</h3>
+                         <p className="text-xs text-gray-400 font-medium">Grade {student.grade}</p>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                         <div className="flex flex-col items-center bg-green-50 border border-green-100 rounded-lg px-3 py-1 min-w-[50px]">
+                            <span className="text-sm font-bold text-green-600">{stats.p}</span>
+                            <span className="text-[9px] font-bold text-green-400 uppercase">Present</span>
+                         </div>
+                         <div className="flex flex-col items-center bg-red-50 border border-red-100 rounded-lg px-3 py-1 min-w-[50px]">
+                            <span className="text-sm font-bold text-red-600">{stats.a}</span>
+                            <span className="text-[9px] font-bold text-red-400 uppercase">Absent</span>
+                         </div>
+                      </div>
+                    </Card>
+                  );
+                })
+              )}
+           </div>
+         ) : (
+           /* MODE: NORMAL DASHBOARD */
+           <>
+              {/* Pending Sync Alert */}
+              {!isOnline && pendingSyncCount > 0 && (
+                  <div className="bg-orange-100 border border-orange-200 text-orange-800 px-3 py-2 rounded-lg text-xs font-medium flex items-center justify-between shadow-sm">
+                    <div className="flex items-center gap-2">
+                        <WifiOff size={14} />
+                        <span>{pendingSyncCount} changes waiting to sync.</span>
+                    </div>
+                  </div>
+              )}
+              
+              {/* Analytics Section */}
+              <AnalyticsSummary students={students} attendance={attendance} feeRecords={feeRecords} />
 
-         {/* A. NOTIFICATION TICKER (Fee Alerts) */}
-         {(feeAlerts.overdueCount > 0) && (
-            <div onClick={() => onNavigate('fees')} className="flex-shrink-0 bg-red-500 text-white rounded-lg px-3 py-2 flex items-center justify-between shadow-md shadow-red-200 cursor-pointer active:scale-[0.98] transition-transform">
-               <div className="flex items-center gap-2">
-                  <div className="bg-white/20 p-1 rounded-full"><AlertCircle size={14} className="text-white" /></div>
-                  <span className="text-xs font-bold">Fees Attention Required</span>
-               </div>
-               <span className="text-[10px] bg-white text-red-600 font-bold px-2 py-0.5 rounded-full">{feeAlerts.overdueCount} Overdue</span>
-            </div>
-         )}
-         
-         {/* C. QUICK ACTION BAR */}
-         <div className="flex-shrink-0 grid grid-cols-2 gap-3">
-             <button onClick={() => onNavigate('attendance')} className="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-xl p-3 flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 active:scale-95 transition-transform">
-                 <CheckCircle size={18} />
-                 <span className="font-bold text-sm">Mark Attend</span>
-             </button>
-             <button onClick={onAddStudentClick} className="bg-white text-gray-700 border border-gray-200 rounded-xl p-3 flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-transform">
-                 <Plus size={18} className="text-indigo-600" />
-                 <span className="font-bold text-sm">Add Student</span>
-             </button>
-         </div>
+              {/* A. NOTIFICATION TICKER (Fee Alerts) */}
+              {(feeAlerts.overdueCount > 0) && (
+                  <div onClick={() => onNavigate('fees')} className="flex-shrink-0 bg-red-500 text-white rounded-lg px-3 py-2 flex items-center justify-between shadow-md shadow-red-200 cursor-pointer active:scale-[0.98] transition-transform">
+                    <div className="flex items-center gap-2">
+                        <div className="bg-white/20 p-1 rounded-full"><AlertCircle size={14} className="text-white" /></div>
+                        <span className="text-xs font-bold">Fees Attention Required</span>
+                    </div>
+                    <span className="text-[10px] bg-white text-red-600 font-bold px-2 py-0.5 rounded-full">{feeAlerts.overdueCount} Overdue</span>
+                  </div>
+              )}
+              
+              {/* C. QUICK ACTION BAR */}
+              <div className="flex-shrink-0 grid grid-cols-2 gap-3">
+                  <button onClick={() => onNavigate('attendance')} className="bg-gradient-to-br from-indigo-500 to-indigo-600 text-white rounded-xl p-3 flex items-center justify-center gap-2 shadow-lg shadow-indigo-200 active:scale-95 transition-transform">
+                      <CheckCircle size={18} />
+                      <span className="font-bold text-sm">Mark Attend</span>
+                  </button>
+                  <button onClick={onAddStudentClick} className="bg-white text-gray-700 border border-gray-200 rounded-xl p-3 flex items-center justify-center gap-2 shadow-sm active:scale-95 transition-transform">
+                      <Plus size={18} className="text-indigo-600" />
+                      <span className="font-bold text-sm">Add Student</span>
+                  </button>
+              </div>
 
-         {/* D. MONTHLY PROGRESS (Horizontal Scroll) */}
-         <div className="flex-shrink-0 bg-white rounded-2xl p-3 shadow-sm border border-gray-100 flex flex-col justify-center min-h-[90px]">
-            <div className="flex justify-between items-center mb-2 px-1">
-               <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Attendance • {new Date().toLocaleString('default', { month: 'short' })}</span>
-               <span className="text-[10px] text-indigo-500 font-bold bg-indigo-50 px-2 py-0.5 rounded-full">Top Students</span>
-            </div>
-            {currentMonthStats.length === 0 ? (
-               <div className="text-center text-xs text-gray-300 py-1">No activity yet.</div>
-            ) : (
-               <div className="flex overflow-x-auto gap-4 pb-1 no-scrollbar px-1 items-center">
-                  {currentMonthStats.map(student => (
-                     <div key={student.id} className="flex flex-col items-center gap-1.5 min-w-[56px] snap-center">
-                        <div className="relative">
-                           <div className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center overflow-hidden border border-gray-100 shadow-sm">
-                              {student.photo ? <img src={student.photo} className="w-full h-full object-cover"/> : <span className="text-xs font-bold text-gray-400">{student.name.charAt(0)}</span>}
-                           </div>
-                           <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5 shadow-sm ring-1 ring-gray-50">
-                              <CircularProgress value={student.presentCount} size={16} strokeWidth={3} />
-                           </div>
+              {/* E. STATS BENTO GRID (Fills remaining space) */}
+              {/* Removed min-h-0 to allow it to grow if needed when scrolling */}
+              <div className="grid grid-cols-2 gap-3 flex-shrink-0 pb-16">
+                  
+                  {/* 1. Total Students */}
+                  <div onClick={() => onNavigate('students')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-blue-200 group">
+                      <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-2 group-hover:scale-110 transition-transform">
+                        <Users size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-bold text-gray-800 leading-none mb-1">{totalStudents}</h3>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">Active Students</p>
+                      </div>
+                  </div>
+
+                  {/* 2. Classes */}
+                  <div onClick={() => onNavigate('timetable')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-pink-200 group">
+                      <div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center text-pink-600 mb-2 group-hover:scale-110 transition-transform">
+                        <CalendarDays size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-2xl font-bold text-gray-800 leading-none mb-1">{totalClasses}</h3>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">Weekly Classes</p>
+                      </div>
+                  </div>
+
+                  {/* 3. Marks */}
+                  <div onClick={() => onNavigate('marks')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-purple-200 group">
+                      <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600 mb-2 group-hover:scale-110 transition-transform">
+                        <TrendingUp size={20} />
+                      </div>
+                      <div>
+                        <div className="flex items-end gap-1 mb-1">
+                            <h3 className="text-2xl font-bold text-gray-800 leading-none">AI</h3>
+                            <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded mb-0.5">Analyze</span>
                         </div>
-                        <span className="text-[9px] font-medium text-gray-600 truncate w-16 text-center">{student.name.split(' ')[0]}</span>
-                     </div>
-                  ))}
-               </div>
-            )}
-         </div>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">Exam Progress</p>
+                      </div>
+                  </div>
 
-         {/* E. STATS BENTO GRID (Fills remaining space) */}
-         <div className="flex-1 grid grid-cols-2 gap-3 min-h-0">
-             
-             {/* 1. Total Students */}
-             <div onClick={() => onNavigate('students')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-blue-200 group">
-                <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 mb-2 group-hover:scale-110 transition-transform">
-                   <Users size={20} />
-                </div>
-                <div>
-                   <h3 className="text-2xl font-bold text-gray-800 leading-none mb-1">{totalStudents}</h3>
-                   <p className="text-[10px] font-bold text-gray-400 uppercase">Active Students</p>
-                </div>
-             </div>
+                  {/* 4. Fees */}
+                  <div onClick={() => onNavigate('fees')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-orange-200 group">
+                      <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600 mb-2 group-hover:scale-110 transition-transform">
+                        <CreditCard size={20} />
+                      </div>
+                      <div>
+                        <div className="flex items-end gap-1 mb-1">
+                            <h3 className="text-2xl font-bold text-gray-800 leading-none">{feeAlerts.overdueCount > 0 ? '!' : 'OK'}</h3>
+                            {feeAlerts.overdueCount > 0 && <span className="text-[9px] text-red-500 font-bold mb-0.5">Action</span>}
+                        </div>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase">Fee Status</p>
+                      </div>
+                  </div>
 
-             {/* 2. Classes */}
-             <div onClick={() => onNavigate('timetable')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-pink-200 group">
-                <div className="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center text-pink-600 mb-2 group-hover:scale-110 transition-transform">
-                   <CalendarDays size={20} />
-                </div>
-                <div>
-                   <h3 className="text-2xl font-bold text-gray-800 leading-none mb-1">{totalClasses}</h3>
-                   <p className="text-[10px] font-bold text-gray-400 uppercase">Weekly Classes</p>
-                </div>
-             </div>
-
-             {/* 3. Marks */}
-             <div onClick={() => onNavigate('marks')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-purple-200 group">
-                <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600 mb-2 group-hover:scale-110 transition-transform">
-                   <TrendingUp size={20} />
-                </div>
-                <div>
-                   <div className="flex items-end gap-1 mb-1">
-                      <h3 className="text-2xl font-bold text-gray-800 leading-none">AI</h3>
-                      <span className="text-[9px] bg-purple-100 text-purple-700 px-1 rounded mb-0.5">Analyze</span>
-                   </div>
-                   <p className="text-[10px] font-bold text-gray-400 uppercase">Exam Progress</p>
-                </div>
-             </div>
-
-             {/* 4. Fees */}
-             <div onClick={() => onNavigate('fees')} className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 flex flex-col justify-between cursor-pointer active:scale-95 transition-transform hover:border-orange-200 group">
-                <div className="w-10 h-10 rounded-full bg-orange-50 flex items-center justify-center text-orange-600 mb-2 group-hover:scale-110 transition-transform">
-                   <CreditCard size={20} />
-                </div>
-                <div>
-                   <div className="flex items-end gap-1 mb-1">
-                      <h3 className="text-2xl font-bold text-gray-800 leading-none">{feeAlerts.overdueCount > 0 ? '!' : 'OK'}</h3>
-                      {feeAlerts.overdueCount > 0 && <span className="text-[9px] text-red-500 font-bold mb-0.5">Action</span>}
-                   </div>
-                   <p className="text-[10px] font-bold text-gray-400 uppercase">Fee Status</p>
-                </div>
-             </div>
-
-         </div>
-         
-         {/* Footer Info */}
-         <div className="flex-shrink-0 text-center pb-1">
-            <p className="text-[9px] text-gray-300 font-medium">English Class Academy • v2.3 (PWA)</p>
-         </div>
+              </div>
+              
+              {/* Footer Info */}
+              <div className="flex-shrink-0 text-center pb-1">
+                  <p className="text-[9px] text-gray-300 font-medium">English Class Academy • v2.3 (PWA)</p>
+              </div>
+           </>
+         )}
 
       </div>
     </div>

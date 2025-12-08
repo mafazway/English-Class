@@ -1,6 +1,7 @@
 
 
 
+
 import React, { useState, useEffect } from 'react';
 import { Student, ClassGroup, AttendanceRecord, FeeRecord, ExamRecord, View, CloudConfig } from './types';
 import Dashboard from './components/Dashboard';
@@ -295,23 +296,30 @@ const App: React.FC = () => {
   };
 
   const saveAttendance = (r: AttendanceRecord) => {
+     // SMART UPSERT LOGIC
+     // Check if a record already exists for this Class + Date.
+     // If so, force the ID to match the existing one to perform an UPDATE instead of INSERT.
+     const existingRecord = attendance.find(ex => ex.classId === r.classId && ex.date === r.date);
+     
+     const recordToSave = existingRecord ? { ...r, id: existingRecord.id } : r;
+
      setAttendance(prev => {
-        const idx = prev.findIndex(ex => ex.classId === r.classId && ex.date === r.date);
+        const idx = prev.findIndex(ex => ex.classId === recordToSave.classId && ex.date === recordToSave.date);
         if (idx >= 0) {
            const copy = [...prev];
-           copy[idx] = r;
+           copy[idx] = recordToSave;
            return copy;
         }
-        return [...prev, r];
+        return [...prev, recordToSave];
      });
 
      const dbPayload = {
-        id: r.id, 
-        class_id: r.classId, 
-        date: r.date, 
-        student_ids_present: r.studentIdsPresent,
-        contacted_absentees: r.contactedAbsentees,
-        status: r.status // Add Status
+        id: recordToSave.id, 
+        class_id: recordToSave.classId, 
+        date: recordToSave.date, 
+        student_ids_present: recordToSave.studentIdsPresent,
+        contacted_absentees: recordToSave.contactedAbsentees,
+        status: recordToSave.status
      };
      syncMutation('attendance', 'UPSERT', dbPayload);
   };

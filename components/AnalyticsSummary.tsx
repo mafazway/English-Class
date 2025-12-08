@@ -124,6 +124,9 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
               }
           }
       }
+      
+      // NEW FILTER: Only count students who had already joined by this date
+      expectedStudents = expectedStudents.filter(s => !s.joinedDate || r.date >= s.joinedDate);
 
       // If after all logic, we found expected students, calculate absents.
       // If expectedStudents is still empty (rare), we can't count absents, only present.
@@ -156,6 +159,9 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
       const rNum = (r.classId === 'general' || r.classId === 'All') ? 'All' : getNormalizedGrade(r.classId);
 
       const relevantStudents = students.filter(s => {
+         // CHECK JOIN DATE
+         if (s.joinedDate && r.date < s.joinedDate) return false;
+
          if (rNum === 'All') return true;
          const sNum = getNormalizedGrade(s.grade);
          return sNum && rNum && sNum === rNum;
@@ -229,6 +235,9 @@ const AnalyticsSummary: React.FC<Props> = ({ students, attendance, feeRecords })
      // 2. Group by Grade
      const groups: Record<string, { total: number, present: number }> = {};
      students.forEach(s => {
+        // Skip students who haven't joined yet if looking at today
+        if (s.joinedDate && todayStr < s.joinedDate) return;
+
         const g = s.grade || 'Unknown';
         if (!groups[g]) groups[g] = { total: 0, present: 0 };
         
